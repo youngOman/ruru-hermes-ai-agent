@@ -22,7 +22,8 @@
 - 結尾固定加 `Co-Authored-By` 註腳
 
 範例：
-```
+
+```text
 feat: 對話訊息支援 Markdown 渲染
 
 整合 react-markdown + remark-gfm，AI 回覆裡的 code block、
@@ -47,6 +48,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ### 同步 CHANGELOG.md 的義務
 
 完成有使用者可見變更的 todo 時（feature / bugfix / 行為改變），記得**同時更新**：
+
 - repo 根目錄的 `CHANGELOG.md`（`[Unreleased]` 區塊新增條目）
 - `src/data/changelog.ts`（如果是準備發版才動，不是每次都動）
 
@@ -61,6 +63,31 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - 對話 API：`/v1/chat/completions`（SSE），proxy 到 `127.0.0.1:8642`（Hermes API server）
 - 資料：sessions 持久化在 `localStorage`，key = `hermes-webui:state:v1`
 - 開發紀錄：人類版在 `CHANGELOG.md`、UI 版在 `src/data/changelog.ts`
+
+## 本地開發 / 測試流程
+
+Hermes API server 跑在 mac mini（`mini` Tailscale host）的 `:8642`。
+筆電開發時透過 SSH tunnel 把筆電的 `127.0.0.1:8642` 接到 mac mini：
+
+```bash
+# Terminal 1：開 tunnel（持續跑著，Ctrl-C 結束）
+npm run tunnel
+
+# Terminal 2：跑 Vite
+npm run dev    # → http://localhost:5174
+```
+
+工具 script：
+
+- `npm run tunnel` — 開 tunnel（預設連 `mini`，可用 `HERMES_SSH_HOST=xxx npm run tunnel` 換目標）
+- `npm run tunnel:status` — 看 tunnel 是否在 listen
+- `npm run tunnel:kill` — 殺掉背景 tunnel process
+
+要求：
+
+- 筆電 `~/.ssh/config` 有 `Host mini` block（含 `ServerAliveInterval` keep-alive）
+- mac mini 開 Remote Login + 筆電 public key 已推上去（`ssh-copy-id young@mini`）
+- 兩台都連著 Tailscale
 
 ## 風格約定
 

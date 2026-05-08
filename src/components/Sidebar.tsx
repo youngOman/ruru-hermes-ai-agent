@@ -52,13 +52,20 @@ export function Sidebar({
       {/* Logo */}
       <div className="sidebar-logo">
         <div className="logo-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" fill="var(--accent)" />
-            <path d="M2 17l10 5 10-5" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M2 12l10 5 10-5" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <defs>
+              <linearGradient id="logo-grad" x1="0" x2="1" y1="0" y2="1">
+                <stop offset="0%" stopColor="#a98bff" />
+                <stop offset="100%" stopColor="#6ee7ff" />
+              </linearGradient>
+            </defs>
+            <path d="M12 2L2 7l10 5 10-5-10-5z" fill="url(#logo-grad)" />
+            <path d="M2 17l10 5 10-5" stroke="url(#logo-grad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M2 12l10 5 10-5" stroke="url(#logo-grad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
         <span className="logo-text">Hermes</span>
+        <span className="logo-sparkle">✦</span>
       </div>
 
       {/* Nav */}
@@ -79,7 +86,7 @@ export function Sidebar({
       {currentPage === 'chat' && (
         <>
           <div className="sidebar-section-header">
-            <span className="text-xs text-muted">對話</span>
+            <span className="section-label">對話</span>
             <button className="new-session-btn" onClick={onNewSession} title="新對話">
               <Plus size={14} />
             </button>
@@ -109,6 +116,7 @@ export function Sidebar({
                   />
                 ) : (
                   <>
+                    <span className="session-dot" aria-hidden="true" />
                     <span className="session-name truncate">{session.name}</span>
                     <button
                       className="session-menu-btn"
@@ -143,184 +151,282 @@ export function Sidebar({
         </>
       )}
 
+      <div className="sidebar-footer">
+        <span className="footer-text">made with ✦ for ruru</span>
+      </div>
+
       <style>{`
         .sidebar {
-          width: 240px;
-          min-width: 240px;
+          width: 248px;
+          min-width: 248px;
           height: 100%;
-          background: var(--bg-secondary);
+          position: relative;
+          background: linear-gradient(180deg,
+            rgba(18, 18, 44, 0.85) 0%,
+            rgba(12, 12, 36, 0.7) 100%);
+          backdrop-filter: blur(24px) saturate(140%);
+          -webkit-backdrop-filter: blur(24px) saturate(140%);
           border-right: 1px solid var(--border);
           display: flex;
           flex-direction: column;
           overflow: hidden;
+          z-index: 1;
+        }
+        .sidebar::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 1px;
+          height: 100%;
+          background: linear-gradient(180deg,
+            transparent,
+            rgba(169, 139, 255, 0.4) 30%,
+            rgba(110, 231, 255, 0.3) 70%,
+            transparent);
+          pointer-events: none;
         }
         .sidebar-logo {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
-          padding: 1rem;
+          gap: 0.625rem;
+          padding: 1.125rem 1.125rem 1rem;
           border-bottom: 1px solid var(--border);
+          position: relative;
         }
         .logo-icon {
           display: flex;
           align-items: center;
           justify-content: center;
+          filter: drop-shadow(0 0 12px rgba(169, 139, 255, 0.55));
         }
         .logo-text {
-          font-weight: 600;
-          font-size: 1rem;
+          font-weight: 700;
+          font-size: 1.05rem;
           letter-spacing: -0.02em;
+          background: linear-gradient(135deg, #fff 0%, #c8b8ff 60%, #6ee7ff 100%);
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+        .logo-sparkle {
+          margin-left: auto;
+          font-size: 0.75rem;
+          color: var(--accent);
+          animation: twinkle 2.4s ease-in-out infinite;
+          text-shadow: 0 0 8px var(--accent-glow);
         }
         .sidebar-nav {
           display: flex;
           flex-direction: column;
           gap: 2px;
-          padding: 0.5rem;
+          padding: 0.625rem;
           border-bottom: 1px solid var(--border);
         }
         .nav-item {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
-          padding: 0.5rem 0.75rem;
-          border-radius: 0.375rem;
-          border: none;
+          gap: 0.625rem;
+          padding: 0.55rem 0.75rem;
+          border-radius: 0.5rem;
+          border: 1px solid transparent;
           background: transparent;
           color: var(--fg-muted);
           font-size: 0.875rem;
           cursor: pointer;
-          transition: all 0.15s;
+          transition: all 0.18s ease;
           text-align: left;
+          position: relative;
         }
         .nav-item:hover {
-          background: var(--card);
+          background: var(--surface);
           color: var(--fg);
+          border-color: var(--border);
         }
         .nav-item.active {
-          background: var(--card);
+          background: linear-gradient(135deg,
+            rgba(169, 139, 255, 0.2),
+            rgba(110, 231, 255, 0.1));
           color: var(--fg);
           font-weight: 500;
+          border-color: rgba(169, 139, 255, 0.35);
+          box-shadow: inset 0 0 12px rgba(169, 139, 255, 0.1);
+        }
+        .nav-item.active::before {
+          content: '';
+          position: absolute;
+          left: -0.625rem;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 3px;
+          height: 60%;
+          background: linear-gradient(180deg, var(--accent), var(--cyan));
+          border-radius: 0 3px 3px 0;
+          box-shadow: 0 0 12px var(--accent-glow);
         }
         .sidebar-section-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0.75rem 1rem 0.25rem;
+          padding: 0.875rem 1.125rem 0.375rem;
+        }
+        .section-label {
+          font-size: 0.6875rem;
+          font-weight: 600;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--fg-subtle);
         }
         .new-session-btn {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 20px;
-          height: 20px;
-          border-radius: 0.25rem;
+          width: 22px;
+          height: 22px;
+          border-radius: 0.375rem;
           border: 1px solid var(--border);
-          background: transparent;
+          background: var(--surface);
           color: var(--fg-muted);
           cursor: pointer;
-          transition: all 0.15s;
+          transition: all 0.18s ease;
         }
         .new-session-btn:hover {
-          background: var(--card);
-          color: var(--fg);
+          background: var(--accent-soft);
+          color: var(--accent);
           border-color: var(--border-hover);
+          box-shadow: 0 0 12px var(--accent-glow);
         }
         .session-list {
           flex: 1;
           overflow-y: auto;
-          padding: 0.25rem 0.5rem;
+          padding: 0.25rem 0.625rem;
         }
         .session-item {
           display: flex;
           align-items: center;
-          gap: 0.25rem;
-          padding: 0.5rem 0.5rem;
-          border-radius: 0.375rem;
+          gap: 0.5rem;
+          padding: 0.55rem 0.625rem;
+          border-radius: 0.5rem;
           cursor: pointer;
-          transition: background 0.15s;
+          transition: all 0.18s ease;
           position: relative;
+          border: 1px solid transparent;
         }
         .session-item:hover {
-          background: var(--card);
+          background: var(--surface);
+          border-color: var(--border);
         }
         .session-item.active {
-          background: var(--card);
-          border: 1px solid var(--border);
+          background: linear-gradient(135deg,
+            rgba(169, 139, 255, 0.18),
+            rgba(110, 231, 255, 0.06));
+          border-color: rgba(169, 139, 255, 0.32);
+        }
+        .session-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          flex-shrink: 0;
+          background: var(--fg-subtle);
+          transition: all 0.18s;
+        }
+        .session-item.active .session-dot {
+          background: var(--accent);
+          box-shadow: 0 0 10px var(--accent-glow);
         }
         .session-name {
           flex: 1;
           font-size: 0.8125rem;
           min-width: 0;
+          color: var(--fg);
+        }
+        .session-item:not(.active) .session-name {
+          color: var(--fg-muted);
         }
         .session-menu-btn {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 20px;
-          height: 20px;
+          width: 22px;
+          height: 22px;
           border-radius: 0.25rem;
           border: none;
           background: transparent;
           color: var(--fg-muted);
           cursor: pointer;
           opacity: 0;
-          transition: opacity 0.15s;
+          transition: all 0.18s;
         }
-        .session-item:hover .session-menu-btn {
+        .session-item:hover .session-menu-btn,
+        .session-item.active .session-menu-btn {
           opacity: 1;
         }
         .session-menu-btn:hover {
-          background: var(--border);
+          background: rgba(169, 139, 255, 0.18);
           color: var(--fg);
         }
         .session-menu {
           position: absolute;
           right: 0.5rem;
           top: 100%;
-          background: var(--card);
-          border: 1px solid var(--border);
-          border-radius: 0.375rem;
+          margin-top: 4px;
+          background: rgba(20, 20, 50, 0.95);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px solid var(--border-hover);
+          border-radius: 0.5rem;
           padding: 0.25rem;
           z-index: 50;
-          min-width: 100px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+          min-width: 120px;
+          box-shadow: var(--shadow-soft), 0 0 24px rgba(169, 139, 255, 0.15);
         }
         .session-menu button {
           display: flex;
           align-items: center;
           gap: 0.5rem;
           width: 100%;
-          padding: 0.375rem 0.5rem;
+          padding: 0.5rem 0.625rem;
           border: none;
           background: transparent;
           color: var(--fg);
           font-size: 0.8125rem;
           cursor: pointer;
-          border-radius: 0.25rem;
+          border-radius: 0.375rem;
           text-align: left;
+          transition: background 0.15s;
         }
         .session-menu button:hover {
-          background: var(--border);
+          background: var(--accent-soft);
         }
         .session-menu button.destructive {
           color: var(--destructive);
         }
         .session-menu button.destructive:hover {
-          background: rgba(239,68,68,0.1);
+          background: rgba(255, 122, 138, 0.12);
         }
         .session-menu button:disabled {
-          opacity: 0.5;
+          opacity: 0.4;
           cursor: not-allowed;
         }
         .session-rename-input {
           flex: 1;
           background: var(--bg);
           border: 1px solid var(--accent);
-          border-radius: 0.25rem;
-          padding: 0.25rem 0.375rem;
+          border-radius: 0.375rem;
+          padding: 0.3rem 0.5rem;
           color: var(--fg);
           font-size: 0.8125rem;
           outline: none;
+          box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+        .sidebar-footer {
+          padding: 0.75rem 1.125rem;
+          border-top: 1px solid var(--border);
+        }
+        .footer-text {
+          font-size: 0.6875rem;
+          color: var(--fg-subtle);
+          letter-spacing: 0.04em;
         }
       `}</style>
     </aside>

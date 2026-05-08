@@ -23,17 +23,22 @@
 ### 拓撲
 
 ```
-[筆電 (akebi)]                              [mac mini (mini)]
-192.168.8.x                                  192.168.1.x
-                                             ├── Hermes API server (:8642)
-                                             ├── Mattermost bot
-                                             ├── Telegram bot
-                                             └── Discord bot
-
-兩台都加入同一個 Tailscale tailnet，所以彼此有 100.x.x.x 的私有 IP
+[公司]                                      [家]
+公司 Wi-Fi 192.168.8.x                       家裡 Wi-Fi 192.168.1.x
+  │                                            │
+  └── 筆電 akebi                                └── mac mini
+       192.168.8.97                                 192.168.1.173
+       Tailscale: 100.108.216.31                    Tailscale: 100.67.90.58
+       │                                            ├── Hermes API server (:8642)
+       │                                            ├── Mattermost bot
+       │                                            ├── Telegram bot
+       │                                            └── Discord bot
+       │
+       └─────── Tailscale tailnet ──────────────────┘
+                  （走 P2P direct，不走 relay）
 ```
 
-兩台不在同一個 LAN 網段（家裡兩個 router 串接，subnet 不同），但都在 Tailscale 上。
+筆電在公司、mac mini 在家 — 兩台**根本不在同一個物理網路**，中間隔著公司 router、ISP、家裡 router 這一整串 NAT。沒有任何方法讓兩台直接互通，所以一定要有某個方式打穿這層 NAT。我選 Tailscale。
 
 ### 我要解決的問題
 
@@ -102,39 +107,46 @@ ssh -L 8642:localhost:8642 user@remote
 
 ---
 
-## 步驟一：先確認兩台連得到
+## 步驟一：先讓兩台能互相連到
 
-我以為兩台在同一個 Wi-Fi 就一定通，但實際上：
+筆電在公司網路、mac mini 在家裡網路 — 中間隔著兩層 NAT，預設**完全不通**：
 
 ```bash
 # 在筆電
 ipconfig getifaddr en0
-# → 192.168.8.97
-route -n get default | grep gateway
-# → 192.168.8.1
+# → 192.168.8.97  ← 公司 Wi-Fi 給的 IP
 
-# 然後試 ping mac mini
+# 試 ping mac mini 的家裡內網 IP
 ping -c 2 192.168.1.173
 # → 100% packet loss ❌
 ```
 
-兩台 IP 在不同 subnet，根本路由不過去。原因是家裡有兩台 router 串接，沒做正確的橋接。
+`192.168.1.173` 這個 IP 只在你家裡有意義，公司 router 根本不知道它是誰，封包送出去就被丟掉。要讓兩台互通，傳統有幾個解法：
 
-### 解法：Tailscale
+| 方法 | 怎麼做 | 缺點 |
+| --- | --- | --- |
+| **公網 IP + port forwarding** | 家裡 router 設 `WAN:22 → mac mini:22` | 整個網際網路都能掃你的 SSH port，要顧防火牆；需要固定 IP 或 DDNS |
+| **自架 VPN**（WireGuard / OpenVPN） | 家裡跑 VPN server、公司筆電當 client | 要花一個下午設定、之後要維護 |
+| **Tailscale** | 兩台裝完登入 | ✅ 零設定、自動 NAT 打穿、加密、免費 |
+| **Cloudflare Tunnel** | 家裡跑 `cloudflared` 把服務暴露到 CF 邊緣 | 適合公開 web 服務，純 SSH 用反而麻煩 |
 
-[Tailscale](https://tailscale.com/) 是 mesh VPN，每台裝置裝完登入後，會拿到一個 `100.x.x.x` 的 Tailscale IP，**任何兩台 tailnet 內的裝置可以互相通訊，不管它們實際在哪個網路**。
+我選 Tailscale。
+
+### Tailscale 在做什麼
+
+[Tailscale](https://tailscale.com/) 是 mesh VPN，每台裝置裝完登入後會拿到一個 `100.x.x.x` 的 Tailscale IP。**任何兩台 tailnet 內的裝置可以互相通訊，不管它們實際在地球哪個角落**。它會自動嘗試 NAT 打穿讓兩台 P2P 直連，打不穿才走 Tailscale 自己的 relay server。
 
 兩台都裝好之後：
 
 ```bash
 tailscale status
 # 100.108.216.31  akebi  loyang0921@  macOS  -
-# 100.67.90.58    mini   loyang0921@  macOS  active; direct ...
+# 100.67.90.58    mini   loyang0921@  macOS  active; direct 61.218.242.49:41641 ...
 ```
 
-`active; direct` 代表兩台之間建立了 P2P 直連（不走 Tailscale 的 relay server），延遲很低。
+`active; direct` 代表 NAT 打穿成功、兩台 P2P 直連。如果是 `relay "xxx"` 就是 NAT 沒打穿、走中繼，延遲會明顯變高（亞洲到美國 relay 尤其明顯）。
 
-之後要連 mac mini 就用 hostname `mini`，Tailscale 會幫忙解析。
+之後要連 mac mini 就用 hostname `mini`，Tailscale 會幫忙解析成 `100.67.90.58`。
 
 ---
 
@@ -261,7 +273,7 @@ npm run dev
 要把這套流程吸收，記住三層抽象：
 
 | 層 | 它在意什麼 | 它不知道什麼 |
-|---|---|---|
+| --- | --- | --- |
 | **前端 (Vite)** | `127.0.0.1:8642` 有沒有人 listen | 真的後端在哪 |
 | **SSH tunnel** | 把流量從筆電 8642 搬到 mac mini 的 8642 | 流量內容是 HTTP 還是其他 |
 | **Hermes API** | 收到 `/v1/chat/completions` 回應 | 請求從筆電還是直接從 mac mini 來 |

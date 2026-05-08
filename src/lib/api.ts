@@ -24,7 +24,7 @@ export interface ChatResponse {
 }
 
 export async function* streamChat(
-  sessionId: string,
+  _sessionId: string,
   messages: ChatMessage[],
   model: string = 'MiniMax-M2.7-highspeed'
 ): AsyncGenerator<{ content: string; done: boolean; usage?: UsageStats }> {
@@ -107,15 +107,22 @@ export async function getSkills(): Promise<string[]> {
   ]
 }
 
-export async function getUpdates(limit: number = 100): Promise<UpdateEntry[]> {
-  // Placeholder for updates/audit log
-  // Will be connected to Hermes session history
-  return []
+export type UpdateTag = 'feature' | 'change' | 'fix'
+
+export interface UpdateItem {
+  tag: UpdateTag
+  text: string
 }
 
-export interface UpdateEntry {
+export interface UpdateRelease {
   id: string
-  timestamp: string
-  action: string
-  details: string
+  date: string // YYYY-MM-DD
+  title: string
+  items: UpdateItem[]
+}
+
+export async function getUpdates(_limit: number = 100): Promise<UpdateRelease[]> {
+  // Placeholder for updates / changelog
+  // Will be connected to Hermes session history / release notes
+  return []
 }

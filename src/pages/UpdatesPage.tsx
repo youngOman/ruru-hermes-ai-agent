@@ -1,308 +1,329 @@
-import { useState } from 'react'
-import { History, Download, Search, Filter } from 'lucide-react'
-import type { UpdateEntry } from '../lib/api'
+import { useMemo, useState } from 'react'
+import { History, Search } from 'lucide-react'
+import type { UpdateTag } from '../lib/api'
+import { CHANGELOG } from '../data/changelog'
 
-// Placeholder data - will be connected to Hermes session history
-const PLACEHOLDER_UPDATES: UpdateEntry[] = [
-  {
-    id: '1',
-    timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-    action: 'chat',
-    details: '新對話：一般聊天',
-  },
-  {
-    id: '2',
-    timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-    action: 'skill',
-    details: '啟用技能：travel-expenses',
-  },
-  {
-    id: '3',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-    action: 'session',
-    details: '建立新 Session：新對話 2',
-  },
-  {
-    id: '4',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-    action: 'chat',
-    details: '對話完成：討論旅行計畫',
-  },
-]
+const TAG_LABEL: Record<UpdateTag, string> = {
+  feature: '新功能',
+  change: '調整',
+  fix: '修正',
+}
 
 export function UpdatesPage() {
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<string>('all')
+  const [tagFilter, setTagFilter] = useState<UpdateTag | 'all'>('all')
 
-  const updates = PLACEHOLDER_UPDATES
+  const releases = CHANGELOG
 
-  const filteredUpdates = updates.filter((u) => {
-    if (filter !== 'all' && u.action !== filter) return false
-    if (search && !u.details.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return releases
+      .map((r) => ({
+        ...r,
+        items: r.items.filter((it) => {
+          if (tagFilter !== 'all' && it.tag !== tagFilter) return false
+          if (q && !it.text.toLowerCase().includes(q) && !r.title.toLowerCase().includes(q))
+            return false
+          return true
+        }),
+      }))
+      .filter((r) => r.items.length > 0)
+  }, [releases, search, tagFilter])
 
-  const formatTime = (iso: string) => {
-    const date = new Date(iso)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
-    const diffMins = Math.floor(diffMs / 60000)
-    const diffHours = Math.floor(diffMs / 3600000)
-    const diffDays = Math.floor(diffMs / 86400000)
-
-    if (diffMins < 1) return '剛剛'
-    if (diffMins < 60) return `${diffMins} 分鐘前`
-    if (diffHours < 24) return `${diffHours} 小時前`
-    if (diffDays < 7) return `${diffDays} 天前`
-    return date.toLocaleDateString('zh-TW')
-  }
-
-  const getActionIcon = (action: string) => {
-    switch (action) {
-      case 'chat':
-        return <span className="action-icon chat">💬</span>
-      case 'skill':
-        return <span className="action-icon skill">✨</span>
-      case 'session':
-        return <span className="action-icon session">📁</span>
-      default:
-        return <span className="action-icon">•</span>
-    }
-  }
-
-  const getActionColor = (action: string) => {
-    switch (action) {
-      case 'chat':
-        return 'var(--accent)'
-      case 'skill':
-        return 'var(--success)'
-      case 'session':
-        return 'var(--warn)'
-      default:
-        return 'var(--fg-muted)'
-    }
-  }
-
-  const handleExport = () => {
-    const csv = [
-      ['時間', '類型', '詳情'],
-      ...filteredUpdates.map((u) => [u.timestamp, u.action, u.details]),
-    ]
-      .map((row) => row.map((c) => `"${c}"`).join(','))
-      .join('\n')
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `hermes-updates-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+  const renderInlineCode = (text: string) => {
+    // Render `x` as <code>x</code>
+    const parts = text.split(/(`[^`]+`)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith('`') && part.endsWith('`')) {
+        return <code key={i}>{part.slice(1, -1)}</code>
+      }
+      return <span key={i}>{part}</span>
+    })
   }
 
   return (
-    <div className="updates-page">
-      <div className="page-header">
-        <div className="header-left">
-          <h1 className="page-title">更新記錄</h1>
-          <p className="page-desc text-muted text-sm">
-            所有操作歷史
-          </p>
-        </div>
-        <button className="export-btn" onClick={handleExport}>
-          <Download size={14} />
-          匯出 CSV
-        </button>
-      </div>
-
-      <div className="filters">
-        <div className="search-box">
-          <Search size={14} className="search-icon" />
-          <input
-            type="text"
-            className="search-input"
-            placeholder="搜尋..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="filter-group">
-          <Filter size={14} className="text-muted" />
-          <select
-            className="filter-select"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          >
-            <option value="all">全部</option>
-            <option value="chat">對話</option>
-            <option value="skill">技能</option>
-            <option value="session">Session</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="updates-list">
-        {filteredUpdates.length === 0 ? (
-          <div className="empty-state">
-            <History size={32} className="text-muted" />
-            <p className="text-muted text-sm">沒有符合條件的記錄</p>
+    <div className="page-container">
+      <div className="updates-page">
+        <header className="updates-header">
+          <div className="updates-title-row">
+            <span className="updates-title-icon" aria-hidden="true">
+              <History size={20} />
+            </span>
+            <h1 className="updates-title">更新紀錄</h1>
           </div>
-        ) : (
-          filteredUpdates.map((update) => (
-            <div key={update.id} className="update-item">
-              {getActionIcon(update.action)}
-              <div className="update-content">
-                <span className="update-time">{formatTime(update.timestamp)}</span>
-                <span className="update-details">{update.details}</span>
-              </div>
-              <span
-                className="update-action-badge"
-                style={{ color: getActionColor(update.action) }}
+          <p className="updates-subtitle">
+            Hermes Console 是內部工具，會頻繁更新。新功能與破壞性變動會在 Mattermost 主動通知；其他調整在這裡看就好。
+          </p>
+        </header>
+
+        <div className="updates-toolbar">
+          <div className="search-box">
+            <Search size={14} className="search-icon" />
+            <input
+              type="text"
+              className="search-input"
+              placeholder="搜尋更新..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="tag-filters">
+            {(['all', 'feature', 'change', 'fix'] as const).map((t) => (
+              <button
+                key={t}
+                className={`tag-filter-btn ${tagFilter === t ? 'active' : ''}`}
+                onClick={() => setTagFilter(t)}
               >
-                {update.action}
-              </span>
+                {t === 'all' ? '全部' : TAG_LABEL[t]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="releases">
+          {filtered.length === 0 ? (
+            <div className="empty-state">
+              <History size={28} />
+              <p>沒有符合條件的更新</p>
             </div>
-          ))
-        )}
+          ) : (
+            filtered.map((release) => (
+              <article key={release.id} className="release-card">
+                <header className="release-header">
+                  <span className="release-date">{release.date}</span>
+                  <h2 className="release-title">{release.title}</h2>
+                </header>
+                <hr className="release-divider" />
+                <ul className="release-items">
+                  {release.items.map((item, idx) => (
+                    <li key={idx} className="release-item">
+                      <span className={`tag tag-${item.tag}`}>{TAG_LABEL[item.tag]}</span>
+                      <span className="item-text">{renderInlineCode(item.text)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))
+          )}
+        </div>
       </div>
 
       <style>{`
+        .page-container {
+          height: 100%;
+          overflow-y: auto;
+          position: relative;
+          z-index: 1;
+        }
         .updates-page {
-          padding: 1.5rem;
-          max-width: 800px;
+          padding: 2rem 2rem 3rem;
+          max-width: 880px;
+          margin: 0 auto;
         }
-        .page-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          margin-bottom: 1.5rem;
+
+        /* Header */
+        .updates-header {
+          margin-bottom: 1.75rem;
         }
-        .page-title {
-          font-size: 1.5rem;
-          font-weight: 600;
-          letter-spacing: -0.02em;
-        }
-        .page-desc {
-          margin-top: 0.25rem;
-        }
-        .export-btn {
+        .updates-title-row {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
-          padding: 0.5rem 0.875rem;
-          border-radius: 0.5rem;
-          border: 1px solid var(--border);
-          background: var(--card);
+          gap: 0.625rem;
+          margin-bottom: 0.5rem;
+        }
+        .updates-title-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          color: var(--accent);
+          filter: drop-shadow(0 0 8px var(--accent-glow));
+        }
+        .updates-title {
+          font-size: 1.65rem;
+          font-weight: 700;
+          letter-spacing: -0.02em;
           color: var(--fg);
-          font-size: 0.8125rem;
-          cursor: pointer;
-          transition: all 0.15s;
         }
-        .export-btn:hover {
-          border-color: var(--border-hover);
-          background: var(--card-hover);
+        .updates-subtitle {
+          color: var(--fg-muted);
+          font-size: 0.875rem;
+          line-height: 1.65;
+          max-width: 640px;
         }
-        .filters {
+
+        /* Toolbar */
+        .updates-toolbar {
           display: flex;
           align-items: center;
           gap: 0.75rem;
-          margin-bottom: 1rem;
+          margin-bottom: 1.5rem;
+          flex-wrap: wrap;
         }
         .search-box {
           position: relative;
           flex: 1;
-          max-width: 300px;
+          min-width: 220px;
+          max-width: 320px;
         }
         .search-icon {
           position: absolute;
-          left: 0.75rem;
+          left: 0.85rem;
           top: 50%;
           transform: translateY(-50%);
           color: var(--fg-muted);
         }
         .search-input {
           width: 100%;
-          padding: 0.5rem 0.75rem 0.5rem 2.25rem;
-          border-radius: 0.5rem;
+          padding: 0.5rem 0.8rem 0.5rem 2.3rem;
+          border-radius: 0.55rem;
           border: 1px solid var(--border);
-          background: var(--card);
+          background: var(--surface);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
           color: var(--fg);
           font-size: 0.875rem;
           outline: none;
-          transition: border-color 0.15s;
+          transition: all 0.18s ease;
         }
         .search-input:focus {
-          border-color: var(--accent);
+          border-color: var(--border-hover);
+          box-shadow: 0 0 0 3px var(--accent-soft);
         }
         .search-input::placeholder {
-          color: var(--fg-muted);
+          color: var(--fg-subtle);
         }
-        .filter-group {
+        .tag-filters {
           display: flex;
-          align-items: center;
-          gap: 0.5rem;
+          gap: 0.3rem;
         }
-        .filter-select {
-          padding: 0.5rem 0.75rem;
-          border-radius: 0.5rem;
+        .tag-filter-btn {
+          padding: 0.4rem 0.8rem;
+          border-radius: 9999px;
           border: 1px solid var(--border);
-          background: var(--card);
-          color: var(--fg);
-          font-size: 0.875rem;
-          outline: none;
+          background: var(--surface);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          color: var(--fg-muted);
+          font-size: 0.75rem;
           cursor: pointer;
+          transition: all 0.18s ease;
         }
-        .filter-select:focus {
-          border-color: var(--accent);
+        .tag-filter-btn:hover {
+          color: var(--fg);
+          border-color: var(--border-hover);
         }
-        .updates-list {
+        .tag-filter-btn.active {
+          background: var(--accent-soft);
+          color: var(--accent);
+          border-color: rgba(169, 139, 255, 0.4);
+        }
+
+        /* Release cards */
+        .releases {
           display: flex;
           flex-direction: column;
-          gap: 0.25rem;
+          gap: 1rem;
         }
-        .update-item {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          padding: 0.75rem 1rem;
-          border-radius: 0.5rem;
-          background: var(--card);
+        .release-card {
+          padding: 1.25rem 1.4rem 1.4rem;
+          border-radius: 0.85rem;
+          background: rgba(15, 15, 35, 0.55);
+          backdrop-filter: blur(14px);
+          -webkit-backdrop-filter: blur(14px);
           border: 1px solid var(--border);
-          transition: background 0.15s;
+          transition: border-color 0.2s ease;
         }
-        .update-item:hover {
-          background: var(--card-hover);
+        .release-card:hover {
+          border-color: rgba(169, 139, 255, 0.22);
         }
-        .action-icon {
-          font-size: 1rem;
-          width: 24px;
-          text-align: center;
+        .release-header {
+          display: flex;
+          align-items: baseline;
+          gap: 1rem;
+          flex-wrap: wrap;
+        }
+        .release-date {
+          font-size: 0.8125rem;
+          color: var(--fg-subtle);
+          font-variant-numeric: tabular-nums;
+          letter-spacing: 0.01em;
           flex-shrink: 0;
         }
-        .update-content {
-          flex: 1;
+        .release-title {
+          font-size: 1.05rem;
+          font-weight: 600;
+          color: var(--fg);
+          letter-spacing: -0.01em;
+          line-height: 1.4;
+        }
+        .release-divider {
+          margin: 0.85rem 0 1rem;
+          border: none;
+          border-top: 1px solid var(--border);
+        }
+        .release-items {
+          list-style: none;
+          padding: 0;
+          margin: 0;
           display: flex;
           flex-direction: column;
-          gap: 0.125rem;
+          gap: 0.65rem;
+        }
+        .release-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.65rem;
+          line-height: 1.6;
+        }
+        .item-text {
+          font-size: 0.875rem;
+          color: var(--fg);
+          flex: 1;
           min-width: 0;
         }
-        .update-time {
-          font-size: 0.6875rem;
-          color: var(--fg-muted);
+        .item-text code {
+          font-family: 'SF Mono', Menlo, Consolas, monospace;
+          font-size: 0.85em;
+          padding: 0.1em 0.35em;
+          background: rgba(110, 231, 255, 0.1);
+          border: 1px solid rgba(110, 231, 255, 0.18);
+          border-radius: 0.3rem;
+          color: var(--cyan);
         }
-        .update-details {
-          font-size: 0.875rem;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .update-action-badge {
+
+        /* Tags */
+        .tag {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.18rem 0.6rem;
+          border-radius: 9999px;
           font-size: 0.6875rem;
           font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
+          letter-spacing: 0.02em;
           flex-shrink: 0;
+          margin-top: 0.15rem;
+          border: 1px solid transparent;
+          line-height: 1.4;
         }
+        .tag-feature {
+          background: rgba(94, 158, 255, 0.14);
+          color: #7eb6ff;
+          border-color: rgba(94, 158, 255, 0.32);
+        }
+        .tag-change {
+          background: rgba(140, 140, 180, 0.14);
+          color: #b8b8d8;
+          border-color: rgba(140, 140, 180, 0.28);
+        }
+        .tag-fix {
+          background: rgba(94, 234, 212, 0.12);
+          color: #5eead4;
+          border-color: rgba(94, 234, 212, 0.28);
+        }
+
+        /* Empty */
         .empty-state {
           display: flex;
           flex-direction: column;
@@ -311,9 +332,13 @@ export function UpdatesPage() {
           gap: 0.75rem;
           padding: 3rem;
           text-align: center;
-          background: var(--card);
-          border: 1px dashed var(--border);
-          border-radius: 0.5rem;
+          background: var(--surface);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px dashed rgba(169, 139, 255, 0.2);
+          border-radius: 0.75rem;
+          color: var(--fg-muted);
+          font-size: 0.875rem;
         }
       `}</style>
     </div>

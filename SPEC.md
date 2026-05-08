@@ -16,17 +16,20 @@
 ## 🗺 功能藍圖
 
 ### Phase 1 — 核心功能
+
 - [x] 多 Session 分頁系統（左側 sidebar 列表）
 - [x] 對話區（訊息展示、輸入框）
 - [x] Session 新增 / 關閉 / 切換
 - [x] 好看的前端介面
 
 ### Phase 2 — Skills 管理
+
 - [ ] Skills 列表頁面
 - [ ] 個別 Skill 啟用/停用
 - [ ] Skills 同步狀態
 
 ### Phase 3 — 更新記錄
+
 - [ ] 操作歷史日誌
 - [ ] 時間/類型過濾
 - [ ] 匯出功能
@@ -54,11 +57,13 @@
 ## 🎨 設計風格
 
 **參考**：hermes-admin（簡約、功能導向）
+
 - **色調**：深色 theme（類似 Linear/Vercel Console）
 - **字體**：Inter + Noto Sans CJK
 - **元件**：shadcn/ui 風格
 
 ### 主色調
+
 ```
 --bg: #09090b (zinc-950)
 --fg: #fafafa
@@ -83,17 +88,20 @@
 ## 🔧 Session 管理設計
 
 ### 左側 Sidebar
+
 - Session 列表（名稱 + 狀態）
 - [+ 新增 Session] 按鈕
 - 當前活躍 Session 標記
 
 ### 右側對話區
+
 - 訊息泡泡（User 右/AI 左）
 - 輸入框 + 發送
 - 串流回覆顯示
 - 技能啟用指示（当前使用的 Skills）
 
 ### Session 狀態
+
 ```
 🟢 運行中（streaming 回覆）
 🟡 等待中（等待 API 回應）

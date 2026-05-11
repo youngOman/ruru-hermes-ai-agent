@@ -60,9 +60,22 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 - React 19 + TypeScript + Vite
 - 樣式：每個元件內嵌 `<style>` 區塊（CSS-in-component），全域 token 在 `src/index.css`
-- 對話 API：`/v1/chat/completions`（SSE），proxy 到 `127.0.0.1:8642`（Hermes API server）
+- 對話 API：`/v1/chat/completions`（SSE），proxy 到 `127.0.0.1:8642`（Hermes gateway）
+- Admin API：`/api/*` proxy 到 `127.0.0.1:9119`（Hermes dashboard），靠 SPA-injected session token 認證，封裝在 `src/lib/adminApi.ts`
 - 資料：sessions 持久化在 `localStorage`，key = `hermes-webui:state:v1`
 - 開發紀錄：人類版在 `CHANGELOG.md`、UI 版在 `src/data/changelog.ts`
+
+## 已知行為（不是 bug，是 by design）
+
+### Session 刪除是「只在前端隱藏」
+
+`App.tsx:deleteSession` 只動 React state + localStorage，沒打任何後端 API：
+
+- **前端的 session**（`session_<timestamp>_<rand>` id 格式）= 訊息容器，純前端概念
+- **後端 Hermes 的 session**（`api-<hex>` id 格式）= 每次 `streamChat` 後端自己生成的紀錄
+- 兩邊 id 體系完全不同，沒對齊；前端「刪除」不會影響後端的紀錄
+
+要做「真刪除」需要：前端 `streamChat` 帶 `X-Hermes-Session-Id` header 讓後端用我們指定的 id（而不是後端亂生），這樣前端的「session」才有對應的後端 session 可以 DELETE。2–3 hr 工程量，ROI 不高（資料都是自己的），目前選擇不做。
 
 ## 本地開發 / 測試流程
 

@@ -28,6 +28,7 @@ Hermes WebUI 的開發紀錄。新版本由上往下排（最新在最上面）�
 - `vite.config.ts` 加上 `/api` proxy 到 `127.0.0.1:9119`，以及 `/__hermes_dashboard__` 用來抓 token HTML（不衝突自己的 SPA 路由）
 - `tunnel:status` 同時檢查 8642 和 9119
 - `tunnel:kill` regex 改成可以殺帶多個 `-L` 的 ssh process
+- **後端角色換掉**：mac mini 上 `~/.hermes/SOUL.md` 從「明日小路 = Young 的老婆」改成「ruru 的專屬 AI 助理（知道 ruru 是 Young 的女友）」。語氣 / 顏文字 / 紀律 / 群組規則全部保留，只動身份段落。原檔備份在 `SOUL.md.backup-20260511-144600`。所有平台都會看到新角色（webui、Telegram、Discord、Mattermost）
 
 ---
 

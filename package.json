@@ -7,9 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "tunnel": "ssh -N -L 8642:localhost:8642 ${HERMES_SSH_HOST:-mini}",
-    "tunnel:status": "lsof -iTCP:8642 -sTCP:LISTEN -nP || echo 'no tunnel'",
-    "tunnel:kill": "pkill -f 'ssh.*-L *8642:localhost:8642' || echo 'no tunnel'"
+    "tunnel": "ssh -N -L 8642:localhost:8642 -L 9119:localhost:9119 ${HERMES_SSH_HOST:-mini}",
+    "tunnel:status": "lsof -iTCP:8642,9119 -sTCP:LISTEN -nP || echo 'no tunnel'",
+    "tunnel:kill": "pkill -f 'ssh.*-L .*localhost:(8642|9119)' || echo 'no tunnel'"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.0.0",

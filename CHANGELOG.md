@@ -21,6 +21,7 @@ Hermes WebUI 的開發紀錄。新版本由上往下排（最新在最上面）�
 - Skills 頁面接上 Hermes Dashboard 真實 API：顯示所有技能、按分類折疊、可即時 toggle 啟用/停用（樂觀更新）、可搜尋
 - `src/lib/adminApi.ts`：封裝 Hermes Dashboard 的 session token 取得（從 SPA HTML 抽 `window.__HERMES_SESSION_TOKEN__`）、自動 cache、401 時自動失效重試
 - `npm run tunnel` 同時轉發 8642（gateway）和 9119（dashboard），單一 SSH process
+- 「活動 & 更新」頁改成三個 tab：版本紀錄（原本的 CHANGELOG）、Sessions（後端真實對話 session 列表，識別來源是 API / Telegram / Discord / Mattermost）、系統 Logs（agent / gateway 兩種 log 即時看，30s 自動 refetch，可選顯示行數，依 INFO/WARN/ERROR 上色）
 
 ### Changed
 

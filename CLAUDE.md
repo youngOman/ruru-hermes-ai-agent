@@ -108,3 +108,28 @@ npm run dev    # → http://localhost:5174
 - 主題：深太空藍紫 + 紫色 accent + 青色 secondary
 - 玻璃面板效果：`backdrop-filter: blur(...)` + 半透明背景
 - 動效要尊重 `prefers-reduced-motion`
+
+---
+
+## ruru 論文資料夾
+
+Ruru（Young 女友）的論文研究資料統一放在 mac 上的：
+
+```text
+/Users/young/Desktop/ruru_論文專區/
+```
+
+當 Young 叫我整理 / 寫 / 收 ruru 論文相關的資料時（research notes、文獻摘要、研究方法分析、翻譯、survey 整理…），預設都丟到這個資料夾，**按主題建子資料夾分類**。例如：
+
+```text
+ruru_論文專區/
+├── VR_滿意度_研究方法分析.md        ← 既有檔
+├── 文獻摘要/
+├── 訪談逐字稿/
+└── 問卷設計/
+```
+
+注意：
+
+- 這個資料夾**不在這個 repo 裡**，是放在 Desktop 上的工作目錄
+- webui 端她上傳的論文檔目前**不會**自動落地到這裡（只進 IndexedDB + 對話），等之後有需要再做後端 upload endpoint

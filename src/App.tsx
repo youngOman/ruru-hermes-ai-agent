@@ -14,12 +14,20 @@ export interface Session {
   autoNamed?: boolean
 }
 
+export interface MessageAttachment {
+  imageId: string
+  name: string
+  mime: string
+  size: number
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: number
   isStreaming?: boolean
+  attachments?: MessageAttachment[]
 }
 
 export type Page = 'chat' | 'skills' | 'updates'

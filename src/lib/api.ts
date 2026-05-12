@@ -1,8 +1,20 @@
 const API_BASE = '/v1'
 
+export interface ChatTextPart {
+  type: 'text'
+  text: string
+}
+
+export interface ChatImagePart {
+  type: 'image_url'
+  image_url: { url: string }
+}
+
+export type ChatContentPart = ChatTextPart | ChatImagePart
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
+  content: string | ChatContentPart[]
 }
 
 export interface UsageStats {

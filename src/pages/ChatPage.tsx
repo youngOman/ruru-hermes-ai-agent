@@ -1,9 +1,26 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Sparkles } from 'lucide-react'
+import { Send, Loader2, Sparkles, ImagePlus, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Session, Message } from '../App'
-import { streamChat } from '../lib/api'
+import type { Session, Message, MessageAttachment } from '../App'
+import { streamChat, type ChatMessage, type ChatContentPart } from '../lib/api'
+import { putImage, blobToDataUrl, getImage, getImageObjectUrl } from '../lib/imageStore'
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10MB — gateway 那邊 base64 化後仍要塞進 request
+const ACCEPT_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+/**
+ * 草稿態的 attachment：剛從 file picker / drop / paste 收進來、
+ * 還沒送出。已經寫進 IndexedDB（拿到 imageId）但同時保留
+ * objectUrl 給 preview thumbnail 用，避免又跑一次 DB 讀取。
+ */
+interface DraftAttachment {
+  imageId: string
+  name: string
+  mime: string
+  size: number
+  objectUrl: string
+}
 
 /**
  * Hermes agents emit absolute mac mini paths like
@@ -25,6 +42,64 @@ function rewriteMediaPaths(text: string): string {
   })
 }
 
+/**
+ * 把已存的 Message 還原成可以送進 streamChat 的 ChatMessage。
+ * 純文字訊息保持 string，多模態才包成 parts array — Gateway 兩種都吃，
+ * 但純字串可以省下一些 JSON 體積。
+ */
+async function materializeMessage(m: Message): Promise<ChatMessage> {
+  const role = m.role as 'user' | 'assistant'
+  if (!m.attachments || m.attachments.length === 0) {
+    return { role, content: m.content }
+  }
+  const parts: ChatContentPart[] = []
+  if (m.content) parts.push({ type: 'text', text: m.content })
+  for (const att of m.attachments) {
+    const stored = await getImage(att.imageId)
+    if (!stored) continue // 圖被使用者從 DB 清掉了；略過該 part，至少對話還能繼續
+    const dataUrl = await blobToDataUrl(stored.blob)
+    parts.push({ type: 'image_url', image_url: { url: dataUrl } })
+  }
+  return { role, content: parts }
+}
+
+/**
+ * 從 IndexedDB 把圖讀出來顯示成 <img>。要單獨抽出來是因為 React 元件
+ * 不能用 async render — useEffect + state 等 object URL 解出來再渲染。
+ */
+function StoredImageThumb({ imageId, name }: { imageId: string; name: string }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [missing, setMissing] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const u = await getImageObjectUrl(imageId)
+      if (cancelled) return
+      if (u) setUrl(u)
+      else setMissing(true)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [imageId])
+
+  if (missing) {
+    return <div className="message-image missing">圖片已遺失</div>
+  }
+  if (!url) {
+    return <div className="message-image missing">載入中…</div>
+  }
+  return (
+    <img
+      src={url}
+      alt={name}
+      className="message-image"
+      onClick={() => window.open(url, '_blank')}
+    />
+  )
+}
+
 interface ChatPageProps {
   session: Session
   onAddMessage: (sessionId: string, message: Message) => void
@@ -43,9 +118,15 @@ export function ChatPage({
 }: ChatPageProps) {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [drafts, setDrafts] = useState<DraftAttachment[]>([])
+  const [isDragging, setIsDragging] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const streamingIdRef = useRef<string | null>(null)
+  // Drag enter / leave 會在子元素間不斷觸發，要用 counter 才不會閃爍
+  const dragDepthRef = useRef(0)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -62,25 +143,118 @@ export function ChatPage({
     inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`
   }, [input])
 
-  const handleSubmit = async () => {
-    if (!input.trim() || isLoading) return
+  const addFiles = async (files: FileList | File[]) => {
+    setUploadError(null)
+    const accepted: DraftAttachment[] = []
+    const errors: string[] = []
 
+    for (const file of Array.from(files)) {
+      if (!ACCEPT_MIME.includes(file.type)) {
+        errors.push(`${file.name || '檔案'} 不是支援的圖片格式`)
+        continue
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        errors.push(`${file.name}（${(file.size / 1024 / 1024).toFixed(1)}MB）超過 10MB`)
+        continue
+      }
+      try {
+        const stored = await putImage(file)
+        accepted.push({
+          imageId: stored.id,
+          name: stored.name,
+          mime: stored.mime,
+          size: stored.size,
+          objectUrl: URL.createObjectURL(stored.blob),
+        })
+      } catch (err) {
+        errors.push(`${file.name} 存檔失敗：${err instanceof Error ? err.message : '未知'}`)
+      }
+    }
+
+    if (accepted.length > 0) setDrafts((prev) => [...prev, ...accepted])
+    if (errors.length > 0) setUploadError(errors.join('；'))
+  }
+
+  const removeDraft = (imageId: string) => {
+    setDrafts((prev) => {
+      const target = prev.find((d) => d.imageId === imageId)
+      if (target) URL.revokeObjectURL(target.objectUrl)
+      return prev.filter((d) => d.imageId !== imageId)
+    })
+  }
+
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      void addFiles(e.target.files)
+    }
+    // 重設 value 才能讓同一個檔案連續選兩次都觸發 onChange
+    e.target.value = ''
+  }
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    dragDepthRef.current += 1
+    setIsDragging(true)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    }
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDragging(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    dragDepthRef.current = 0
+    setIsDragging(false)
+    if (e.dataTransfer.files.length > 0) {
+      void addFiles(e.dataTransfer.files)
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (isLoading) return
     const trimmed = input.trim()
+    // 允許「只有圖、沒有文字」的送出
+    if (!trimmed && drafts.length === 0) return
+
+    const userAttachments: MessageAttachment[] = drafts.map((d) => ({
+      imageId: d.imageId,
+      name: d.name,
+      mime: d.mime,
+      size: d.size,
+    }))
+
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
       role: 'user',
       content: trimmed,
       timestamp: Date.now(),
+      attachments: userAttachments.length > 0 ? userAttachments : undefined,
     }
 
     // Auto-name session on first user message
     const isFirstUserMsg = session.messages.filter((m) => m.role === 'user').length === 0
     if (isFirstUserMsg) {
-      onAutoNameSession(session.id, trimmed)
+      // 純圖片訊息也給個合理 fallback 名字
+      onAutoNameSession(session.id, trimmed || `[圖片] ${userAttachments[0]?.name ?? ''}`)
     }
 
     onAddMessage(session.id, userMessage)
     setInput('')
+    // 草稿用完就清掉，object URL 等下面 send 完後一次 revoke
+    const draftsSnapshot = drafts
+    setDrafts([])
+    setUploadError(null)
     setIsLoading(true)
 
     const assistantMessageId = `msg_${Date.now()}_assistant`
@@ -95,21 +269,39 @@ export function ChatPage({
     streamingIdRef.current = assistantMessageId
 
     try {
-      const messages = session.messages
-        .filter((m) => !m.isStreaming)
-        .map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        }))
-      messages.push({ role: 'user', content: userMessage.content })
+      // 1) 歷史訊息：每則都檢查有沒有 attachments、有就從 IndexedDB 還原成 base64
+      const history: ChatMessage[] = []
+      for (const m of session.messages) {
+        if (m.isStreaming) continue
+        history.push(await materializeMessage(m))
+      }
+
+      // 2) 當前這則：草稿已經是 in-memory 的 blob，直接轉 base64
+      const currentParts: ChatContentPart[] = []
+      if (trimmed) currentParts.push({ type: 'text', text: trimmed })
+      for (const d of draftsSnapshot) {
+        const stored = await getImage(d.imageId)
+        if (!stored) continue
+        const dataUrl = await blobToDataUrl(stored.blob)
+        currentParts.push({ type: 'image_url', image_url: { url: dataUrl } })
+      }
+      history.push({
+        role: 'user',
+        content: currentParts.length === 1 && currentParts[0].type === 'text'
+          ? currentParts[0].text  // 沒附件就回退到簡單字串，省 token
+          : currentParts,
+      })
 
       let fullContent = ''
-      for await (const chunk of streamChat(session.id, messages)) {
+      for await (const chunk of streamChat(session.id, history)) {
         if (chunk.done) break
         fullContent += chunk.content
         onUpdateStreaming(session.id, assistantMessageId, fullContent)
       }
       onFinishStreaming(session.id, assistantMessageId)
+
+      // 送完才 revoke，避免 user message 還在用 thumbnail
+      draftsSnapshot.forEach((d) => URL.revokeObjectURL(d.objectUrl))
     } catch (err) {
       console.error('Chat error:', err)
       onUpdateStreaming(
@@ -138,7 +330,21 @@ export function ChatPage({
   }
 
   return (
-    <div className="chat-container">
+    <div
+      className="chat-container"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-card">
+            <ImagePlus size={36} />
+            <p>放開就上傳給 AI 看</p>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <header className="chat-header">
         <div className="chat-header-left">
@@ -208,7 +414,20 @@ export function ChatPage({
                     {msg.isStreaming && <span className="cursor-blink">▊</span>}
                   </div>
                 ) : (
-                  <span className="user-text">{msg.content}</span>
+                  <>
+                    {msg.content && <span className="user-text">{msg.content}</span>}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="message-images">
+                        {msg.attachments.map((att) => (
+                          <StoredImageThumb
+                            key={att.imageId}
+                            imageId={att.imageId}
+                            name={att.name}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
               <span className="message-time">{formatTime(msg.timestamp)}</span>
@@ -220,7 +439,47 @@ export function ChatPage({
 
       {/* Input */}
       <div className="chat-input-area">
+        {drafts.length > 0 && (
+          <div className="draft-row">
+            {drafts.map((d) => (
+              <div key={d.imageId} className="draft-chip">
+                <img src={d.objectUrl} alt={d.name} />
+                <button
+                  type="button"
+                  className="draft-remove"
+                  onClick={() => removeDraft(d.imageId)}
+                  aria-label={`移除 ${d.name}`}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {uploadError && (
+          <div className="upload-error" role="alert">
+            {uploadError}
+          </div>
+        )}
         <div className={`chat-input-wrapper ${isLoading ? 'loading' : ''}`}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPT_MIME.join(',')}
+            multiple
+            onChange={handleFilePick}
+            style={{ display: 'none' }}
+          />
+          <button
+            type="button"
+            className="attach-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading}
+            aria-label="上傳圖片"
+            title="上傳圖片"
+          >
+            <ImagePlus size={18} />
+          </button>
           <textarea
             ref={inputRef}
             className="chat-input"
@@ -234,7 +493,7 @@ export function ChatPage({
           <button
             className="send-btn"
             onClick={handleSubmit}
-            disabled={!input.trim() || isLoading}
+            disabled={(!input.trim() && drafts.length === 0) || isLoading}
             aria-label="發送"
           >
             {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
@@ -643,6 +902,143 @@ export function ChatPage({
           color: var(--fg-subtle);
           margin-top: 0.625rem;
           letter-spacing: 0.02em;
+        }
+
+        /* === 圖片上傳 === */
+        .attach-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 38px;
+          height: 38px;
+          border-radius: 0.85rem;
+          border: 1px solid transparent;
+          background: transparent;
+          color: var(--fg-muted);
+          cursor: pointer;
+          transition: all 0.18s ease;
+          flex-shrink: 0;
+        }
+        .attach-btn:hover:not(:disabled) {
+          color: var(--accent);
+          background: var(--accent-soft);
+          border-color: rgba(169, 139, 255, 0.3);
+        }
+        .attach-btn:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+        .draft-row {
+          max-width: 920px;
+          margin: 0 auto 0.5rem;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+        .draft-chip {
+          position: relative;
+          width: 64px;
+          height: 64px;
+          border-radius: 0.6rem;
+          overflow: hidden;
+          border: 1px solid var(--border);
+          background: rgba(20, 20, 50, 0.6);
+          box-shadow: var(--shadow-soft);
+        }
+        .draft-chip img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+        .draft-remove {
+          position: absolute;
+          top: 2px;
+          right: 2px;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          border: none;
+          background: rgba(7, 7, 26, 0.85);
+          color: #fff;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          transition: background 0.15s ease;
+        }
+        .draft-remove:hover {
+          background: rgba(220, 70, 90, 0.9);
+        }
+        .upload-error {
+          max-width: 920px;
+          margin: 0 auto 0.5rem;
+          padding: 0.5rem 0.75rem;
+          font-size: 0.75rem;
+          color: #ffb4c0;
+          background: rgba(220, 70, 90, 0.12);
+          border: 1px solid rgba(220, 70, 90, 0.3);
+          border-radius: 0.5rem;
+        }
+        .drop-overlay {
+          position: absolute;
+          inset: 0;
+          z-index: 10;
+          background: rgba(7, 7, 26, 0.75);
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          animation: msg-in 0.18s ease-out;
+        }
+        .drop-overlay-card {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 2rem 3rem;
+          border-radius: 1rem;
+          border: 2px dashed rgba(169, 139, 255, 0.6);
+          background: rgba(20, 20, 50, 0.75);
+          color: var(--accent);
+          font-size: 0.95rem;
+          font-weight: 600;
+          box-shadow: 0 0 36px rgba(169, 139, 255, 0.25);
+        }
+        .drop-overlay-card p { margin: 0; }
+
+        /* user message 內的附件圖 */
+        .message-images {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.4rem;
+          margin-top: 0.4rem;
+        }
+        .message-image {
+          max-width: 220px;
+          max-height: 220px;
+          border-radius: 0.6rem;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          cursor: zoom-in;
+          display: block;
+          transition: transform 0.18s ease;
+        }
+        .message-image:hover {
+          transform: scale(1.02);
+        }
+        .message-image.missing {
+          width: 140px;
+          height: 80px;
+          background: rgba(20, 20, 50, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.75rem;
+          color: var(--fg-subtle);
+          font-style: italic;
         }
       `}</style>
     </div>

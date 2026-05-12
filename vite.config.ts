@@ -1,8 +1,129 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { spawn } from 'node:child_process'
+
+/**
+ * Serve files from the mac mini (where the Hermes agent runs) via SSH.
+ *
+ * Hermes' admin server has no file-serving endpoint, but agents commonly emit
+ * absolute paths like `/Users/young/.hermes/cache/screenshots/xxx.png` after
+ * taking browser screenshots or generating images. The webui needs a way to
+ * render those inline.
+ *
+ * Route: `GET /__hermes_file__/<base64url(absolute-path)>`
+ *  - decodes the path
+ *  - validates it's under an allowlist of safe dirs (no `..`, no random reads)
+ *  - shells out to `ssh ${HERMES_SSH_HOST:-mini} cat <path>` and streams the bytes
+ *  - guesses Content-Type from the file extension
+ *
+ * The SSH connection is reused via the existing `npm run tunnel` ControlMaster
+ * if you've set one up; otherwise each request opens a fresh ssh — slower but
+ * still works.
+ */
+function hermesRemoteFilePlugin(): Plugin {
+  const SSH_HOST = process.env.HERMES_SSH_HOST || 'mini'
+
+  // Whitelist: only serve from these prefixes. Prevents an XSS-injected MEDIA:
+  // path from exfiltrating arbitrary files on the mac mini.
+  const SAFE_PREFIXES = [
+    '/Users/young/.hermes/cache/',
+    '/Users/young/.hermes/image_cache/',
+    '/Users/young/.hermes/images/',
+    '/Users/young/.hermes/screenshots/',
+    '/tmp/hermes/',
+    '/private/tmp/hermes/',
+  ]
+
+  const MIME: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    bmp: 'image/bmp',
+    pdf: 'application/pdf',
+    txt: 'text/plain; charset=utf-8',
+    md: 'text/markdown; charset=utf-8',
+    json: 'application/json',
+  }
+
+  return {
+    name: 'hermes-remote-file',
+    configureServer(server) {
+      server.middlewares.use('/__hermes_file__', (req, res) => {
+        try {
+          const url = req.url || ''
+          const encoded = url.replace(/^\/+/, '').split('?')[0]
+          if (!encoded) {
+            res.statusCode = 400
+            res.end('missing path')
+            return
+          }
+
+          // base64url decode
+          const padded = encoded.replace(/-/g, '+').replace(/_/g, '/')
+          const path = Buffer.from(padded, 'base64').toString('utf-8')
+
+          if (path.includes('..') || !path.startsWith('/')) {
+            res.statusCode = 400
+            res.end('invalid path')
+            return
+          }
+          if (!SAFE_PREFIXES.some((p) => path.startsWith(p))) {
+            res.statusCode = 403
+            res.end(`path not in allowlist: ${path}`)
+            return
+          }
+
+          const ext = path.split('.').pop()?.toLowerCase() || ''
+          const contentType = MIME[ext] || 'application/octet-stream'
+
+          // `ssh -n` so it doesn't read stdin; cat the file; stream stdout out.
+          // BatchMode=yes prevents an interactive password prompt from hanging.
+          const ssh = spawn('ssh', [
+            '-n',
+            '-o', 'BatchMode=yes',
+            '-o', 'ConnectTimeout=5',
+            SSH_HOST,
+            `cat -- ${JSON.stringify(path)}`,
+          ])
+
+          res.setHeader('Content-Type', contentType)
+          res.setHeader('Cache-Control', 'private, max-age=300')
+          res.setHeader('X-Hermes-Source-Path', path)
+
+          ssh.stdout.pipe(res)
+
+          let stderr = ''
+          ssh.stderr.on('data', (chunk) => {
+            stderr += chunk.toString()
+          })
+
+          ssh.on('close', (code) => {
+            if (code !== 0 && !res.writableEnded) {
+              res.statusCode = code === 1 ? 404 : 502
+              res.end(stderr || `ssh exited ${code}`)
+            }
+          })
+
+          ssh.on('error', (err) => {
+            if (!res.writableEnded) {
+              res.statusCode = 502
+              res.end(`ssh error: ${err.message}`)
+            }
+          })
+        } catch (err) {
+          res.statusCode = 500
+          res.end(err instanceof Error ? err.message : String(err))
+        }
+      })
+    },
+  }
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), hermesRemoteFilePlugin()],
   server: {
     host: '0.0.0.0',
     port: 5174,

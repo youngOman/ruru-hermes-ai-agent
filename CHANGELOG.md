@@ -29,6 +29,7 @@ Hermes WebUI 的開發紀錄。新版本由上往下排（最新在最上面）�
 - `tunnel:status` 同時檢查 8642 和 9119
 - `tunnel:kill` regex 改成可以殺帶多個 `-L` 的 ssh process
 - **後端角色換掉**：mac mini 上 `~/.hermes/SOUL.md` 從「明日小路 = Young 的老婆」改成「ruru 的專屬 AI 助理（知道 ruru 是 Young 的女友）」。語氣 / 顏文字 / 紀律 / 群組規則全部保留，只動身份段落。原檔備份在 `SOUL.md.backup-20260511-144600`。所有平台都會看到新角色（webui、Telegram、Discord、Mattermost）
+- AI 回的 `MEDIA:/path/to/x.png` token 現在會自動 render 成圖：訊息 pre-process 改寫成 markdown `![](url)` 語法，URL 指向 dev server 新加的 `/__hermes_file__/<base64-path>` vite plugin，後者用 SSH `cat` 從 mac mini 把檔案 stream 回來。涵蓋 browser screenshot、comfyui 生成圖等所有 agent 產的本機檔。安全層：路徑只能在 `~/.hermes/cache/`、`~/.hermes/image_cache/` 等 allowlist 內，path traversal 會擋 400、allowlist 外擋 403
 
 ---
 

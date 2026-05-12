@@ -5,6 +5,26 @@ import remarkGfm from 'remark-gfm'
 import type { Session, Message } from '../App'
 import { streamChat } from '../lib/api'
 
+/**
+ * Hermes agents emit absolute mac mini paths like
+ *   MEDIA:/Users/young/.hermes/cache/screenshots/browser_xxx.png
+ * after taking screenshots or generating images. We rewrite those into
+ * markdown image syntax pointing at the dev-server's `/__hermes_file__/`
+ * plugin endpoint (defined in vite.config.ts), which streams the file via
+ * SSH from the mac mini.
+ */
+function rewriteMediaPaths(text: string): string {
+  // Match MEDIA: followed by an absolute path ending in a common image ext.
+  // The path can contain anything except whitespace.
+  const MEDIA_RE = /MEDIA:(\/\S+\.(?:png|jpg|jpeg|gif|webp|bmp|svg))/gi
+  return text.replace(MEDIA_RE, (_full, path: string) => {
+    // base64url encode (RFC 4648 §5) — safe for URL path segments
+    const b64 = btoa(path).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const filename = path.split('/').pop() || 'image'
+    return `\n\n![${filename}](/__hermes_file__/${b64})\n\n`
+  })
+}
+
 interface ChatPageProps {
   session: Session
   onAddMessage: (sessionId: string, message: Message) => void
@@ -183,7 +203,7 @@ export function ChatPage({
                 {msg.role === 'assistant' ? (
                   <div className="markdown">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {msg.content || (msg.isStreaming ? '✨' : '')}
+                      {rewriteMediaPaths(msg.content) || (msg.isStreaming ? '✨' : '')}
                     </ReactMarkdown>
                     {msg.isStreaming && <span className="cursor-blink">▊</span>}
                   </div>
@@ -517,6 +537,21 @@ export function ChatPage({
           border: none;
           border-top: 1px solid var(--border);
           margin: 0.8em 0;
+        }
+        .markdown :where(img) {
+          display: block;
+          max-width: min(100%, 560px);
+          max-height: 420px;
+          margin: 0.6em 0;
+          border-radius: 0.6rem;
+          border: 1px solid var(--border);
+          box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+          cursor: zoom-in;
+          transition: transform 0.18s ease;
+        }
+        .markdown :where(img):hover {
+          transform: scale(1.01);
+          border-color: rgba(169, 139, 255, 0.4);
         }
 
         /* Input */

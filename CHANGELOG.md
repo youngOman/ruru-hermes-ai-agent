@@ -16,6 +16,8 @@ Hermes WebUI 的開發紀錄。新版本由上往下排（最新在最上面）�
 
 ### Added
 
+- 對話支援上傳圖片給 AI 看。input 區加 ImagePlus 按鈕點開檔案選擇器；整個 chat container 接 drag & drop，拖檔案進去彈出 overlay 提示放開上傳。送出前可以看到 64×64 縮圖預覽，可單張移除；限制 PNG/JPEG/WebP/GIF、單檔 10MB；圖片 Blob 存進 IndexedDB（不佔 localStorage 上限），message 只記 imageId，reload 後舊訊息附圖也能還原。送 API 時轉 base64 包成 OpenAI 多模態格式（content: [{type:'text'},{type:'image_url'}]），已驗證 Hermes gateway 接受
+- `src/lib/imageStore.ts`：IndexedDB wrapper，提供 putImage / getImage / getImageObjectUrl / deleteImage，object URL 有 module-level cache 避免 re-render 反覆建立
 - `npm run tunnel` / `tunnel:status` / `tunnel:kill` script，把筆電的 `127.0.0.1:8642` 透過 SSH 接到 mac mini 的 Hermes API server，方便在筆電完整測試前端
 - `CLAUDE.md` 補上「本地開發 / 測試流程」段落，記錄 tunnel 流程與所需前置設定
 - Skills 頁面接上 Hermes Dashboard 真實 API：顯示所有技能、按分類折疊、可即時 toggle 啟用/停用（樂觀更新）、可搜尋

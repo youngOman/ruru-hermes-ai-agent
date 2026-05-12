@@ -21,6 +21,20 @@ export interface MessageAttachment {
   size: number
 }
 
+/**
+ * 非圖片的文件附件（PDF / docx / txt / md / 程式碼等）。
+ * 內容已經在上傳時解析成 extractedText，存進 IndexedDB（fileStore），
+ * 訊息只記 fileId + 顯示用 metadata。送 API 時不走多模態，
+ * 而是把 extractedText 接在 message 文字前面送 AI。
+ */
+export interface MessageFileAttachment {
+  fileId: string
+  name: string
+  mime: string
+  size: number
+  charCount: number
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -28,6 +42,7 @@ export interface Message {
   timestamp: number
   isStreaming?: boolean
   attachments?: MessageAttachment[]
+  fileAttachments?: MessageFileAttachment[]
 }
 
 export type Page = 'chat' | 'skills' | 'updates'

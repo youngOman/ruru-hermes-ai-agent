@@ -6,15 +6,21 @@ import type { Session, Message, MessageAttachment, MessageFileAttachment } from 
 import { streamChat, type ChatMessage, type ChatContentPart } from '../lib/api'
 import { putImage, blobToDataUrl, getImage, getImageObjectUrl } from '../lib/imageStore'
 import { putFile, getFile } from '../lib/fileStore'
-import { extractText, isSupportedTextFile } from '../lib/parseFile'
+import {
+  extractFile,
+  isSupportedBinaryDoc,
+  isSupportedFile,
+} from '../lib/parseFile'
 import { ImageLightbox } from '../components/ImageLightbox'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10MB — gateway 那邊 base64 化後仍要塞進 request
 const MAX_FILE_BYTES = 5 * 1024 * 1024 // 5MB — 純文字檔，整檔內容會塞進 prompt，過大 token 會爆
+const MAX_BINARY_DOC_BYTES = 50 * 1024 * 1024 // 50MB — PDF / docx 走後端 server，跟 upload-server 一致
 const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 // accept 屬性下給瀏覽器的提示。實際是否接受由 isSupportedTextFile + IMAGE_MIMES 判斷。
 const FILE_PICKER_ACCEPT = [
   ...IMAGE_MIMES,
+  '.pdf', '.docx', '.doc',
   'text/*',
   '.md', '.markdown', '.csv', '.tsv', '.log',
   '.json', '.jsonc', '.yaml', '.yml', '.toml', '.xml',
@@ -196,6 +202,8 @@ export function ChatPage({
   const [draftFiles, setDraftFiles] = useState<DraftFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  // PDF / docx 走後端解析會花幾秒，用 counter 而不是 boolean 因為可以一次選多個檔
+  const [parsingCount, setParsingCount] = useState(0)
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
 
   const openLightbox = (src: string, alt: string) => setLightbox({ src, alt })
@@ -226,19 +234,15 @@ export function ChatPage({
     const acceptedImages: DraftAttachment[] = []
     const acceptedFiles: DraftFile[] = []
     const errors: string[] = []
+    // PDF / docx 解析會打 mac mini，可能要幾秒，UI 要顯示「處理中」spinner
+    let hasParsingDoc = false
 
     for (const file of Array.from(files)) {
       const isImage = IMAGE_MIMES.includes(file.type)
-      const isText = isSupportedTextFile(file)
+      const isDoc = isSupportedFile(file)
 
-      if (!isImage && !isText) {
-        // PDF / docx 暫時不收 — 等後端 ocr-and-documents skill 接好
-        const ext = file.name.split('.').pop()?.toLowerCase()
-        if (ext === 'pdf' || ext === 'docx' || ext === 'doc') {
-          errors.push(`${file.name}：PDF / Word 還沒接後端解析，先傳純文字 / md / 程式碼或圖片`)
-        } else {
-          errors.push(`${file.name}：不支援的檔案類型`)
-        }
+      if (!isImage && !isDoc) {
+        errors.push(`${file.name}：不支援的檔案類型`)
         continue
       }
 
@@ -262,17 +266,29 @@ export function ChatPage({
         continue
       }
 
-      // 文字檔
-      if (file.size > MAX_FILE_BYTES) {
-        errors.push(`${file.name}（${(file.size / 1024 / 1024).toFixed(1)}MB）超過 5MB，AI 吃不下這麼長`)
+      // 文件分流：
+      //   - PDF / docx：走 upload-server（pymupdf / python-docx），可能慢、會打網路
+      //   - 純文字：file.text() 瀏覽器直接讀
+      const isBinary = isSupportedBinaryDoc(file)
+      const sizeLimit = isBinary ? MAX_BINARY_DOC_BYTES : MAX_FILE_BYTES
+      if (file.size > sizeLimit) {
+        errors.push(
+          `${file.name}（${(file.size / 1024 / 1024).toFixed(1)}MB）超過 ${
+            sizeLimit / 1024 / 1024
+          }MB`,
+        )
         continue
       }
+      if (isBinary) {
+        hasParsingDoc = true
+        setParsingCount((c) => c + 1)
+      }
       try {
-        const text = await extractText(file)
+        const { text } = await extractFile(file)
         const stored = await putFile({
           blob: file,
           name: file.name,
-          mime: file.type || 'text/plain',
+          mime: file.type || (isBinary ? 'application/octet-stream' : 'text/plain'),
           extractedText: text,
         })
         acceptedFiles.push({
@@ -283,13 +299,16 @@ export function ChatPage({
           charCount: stored.charCount,
         })
       } catch (err) {
-        errors.push(`${file.name} 解析失敗：${err instanceof Error ? err.message : '未知'}`)
+        errors.push(`${file.name}：${err instanceof Error ? err.message : '解析失敗'}`)
+      } finally {
+        if (isBinary) setParsingCount((c) => Math.max(0, c - 1))
       }
     }
 
     if (acceptedImages.length > 0) setDrafts((prev) => [...prev, ...acceptedImages])
     if (acceptedFiles.length > 0) setDraftFiles((prev) => [...prev, ...acceptedFiles])
     if (errors.length > 0) setUploadError(errors.join('；'))
+    void hasParsingDoc
   }
 
   const removeDraft = (imageId: string) => {
@@ -617,6 +636,12 @@ export function ChatPage({
 
       {/* Input */}
       <div className="chat-input-area">
+        {parsingCount > 0 && (
+          <div className="parsing-status">
+            <Loader2 size={14} className="animate-spin" />
+            <span>解析 {parsingCount} 份 PDF / Word 中…</span>
+          </div>
+        )}
         {(drafts.length > 0 || draftFiles.length > 0) && (
           <div className="draft-row">
             {drafts.map((d) => (
@@ -677,7 +702,7 @@ export function ChatPage({
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
             aria-label="上傳圖片或文件"
-            title="上傳圖片或文件（.txt / .md / 程式碼，PDF / Word 之後支援）"
+            title="上傳圖片、PDF、Word 或純文字 / 程式碼檔"
           >
             <ImagePlus size={18} />
           </button>
@@ -696,7 +721,8 @@ export function ChatPage({
             onClick={handleSubmit}
             disabled={
               (!input.trim() && drafts.length === 0 && draftFiles.length === 0) ||
-              isLoading
+              isLoading ||
+              parsingCount > 0
             }
             aria-label="發送"
           >
@@ -1329,6 +1355,27 @@ export function ChatPage({
           font-weight: 400;
           opacity: 0.75;
           margin-top: -0.25rem !important;
+        }
+
+        /* PDF / docx 解析中提示 */
+        .parsing-status {
+          max-width: 920px;
+          margin: 0 auto 0.5rem;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.45rem 0.75rem;
+          font-size: 0.75rem;
+          color: var(--accent);
+          background: var(--accent-soft);
+          border: 1px solid rgba(169, 139, 255, 0.25);
+          border-radius: 0.5rem;
+        }
+        .animate-spin {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

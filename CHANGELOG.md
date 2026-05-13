@@ -14,6 +14,12 @@ Hermes WebUI 的開發紀錄。新版本由上往下排（最新在最上面）�
 
 ## [Unreleased]
 
+---
+
+## [0.3.0] — 2026-05-13
+
+論文用 — 上傳文件 / 看大圖 / Hermes Dashboard 整合 / 換 ruru 助理人設
+
 ### Added
 
 - 對話支援上傳純文字檔案給 AI 看。涵蓋 `.txt` / `.md` / `.csv` / `.json` / `.py` / `.ts` / `.tsx` / `.go` / `.rs` / `.sh` / `.sql` / `.yaml` / `.toml` 等所有 isSupportedTextFile 判定為文字的副檔名。送 API 時把內容組成 `[檔案：name（N 字）]\n...\n[/檔案：name]` 區塊接在使用者文字前面；input 草稿區跟 user message 內都有檔名 + 字數 chip。歷史訊息 reload 後也能還原 fileAttachments 內容繼續對話。**PDF / Word 暫時不收**，會友善提示「等後端 ocr-and-documents skill 接好再支援」（pymupdf / marker-pdf 文字抽取品質遠勝前端 pdfjs，特別是表格、公式、scanned PDF OCR — 留給下個 milestone 配合後端 upload endpoint 做）

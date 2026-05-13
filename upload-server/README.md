@@ -15,10 +15,13 @@ PDF / docx 上傳處理用的 mini FastAPI server。
 
 ## 安裝（第一次）
 
+**需要 Python 3.10+**（main.py 用了新版 union syntax `str | None`）。系統 `python3` 在 macOS 上常常還是 3.9 — 要改用明確的版本：
+
 ```bash
-# 在 mac mini 上：
+# 在 mac mini 上（路徑可能要改成你機器上的 Python 3.11）：
+PY=/Users/young/.local/bin/python3.11   # 或 brew 裝的 /opt/homebrew/bin/python3.11
 mkdir -p ~/.hermes-upload-server
-python3 -m venv ~/.hermes-upload-server/venv
+$PY -m venv ~/.hermes-upload-server/venv
 ~/.hermes-upload-server/venv/bin/pip install -U pip
 ~/.hermes-upload-server/venv/bin/pip install \
   fastapi "uvicorn[standard]" python-multipart pymupdf python-docx

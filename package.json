@@ -10,7 +10,7 @@
     "tunnel": "ssh -N -L 8642:localhost:8642 -L 9119:localhost:9119 -L 9120:localhost:9120 ${HERMES_SSH_HOST:-mini}",
     "tunnel:status": "lsof -iTCP:8642,9119,9120 -sTCP:LISTEN -nP || echo 'no tunnel'",
     "tunnel:kill": "pkill -f 'ssh.*-L .*localhost:(8642|9119|9120)' || echo 'no tunnel'",
-    "upload-server:deploy": "rsync -av --delete upload-server/ ${HERMES_SSH_HOST:-mini}:/Users/young/.hermes-upload-server/",
+    "upload-server:deploy": "rsync -av --delete --exclude='venv/' --exclude='*.token' upload-server/ ${HERMES_SSH_HOST:-mini}:/Users/young/.hermes-upload-server/",
     "upload-server:start": "ssh ${HERMES_SSH_HOST:-mini} '/Users/young/.hermes-upload-server/venv/bin/python /Users/young/.hermes-upload-server/main.py'",
     "upload-server:token": "ssh ${HERMES_SSH_HOST:-mini} 'cat /Users/young/.hermes-upload-server.token'"
   },

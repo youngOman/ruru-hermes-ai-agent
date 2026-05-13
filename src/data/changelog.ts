@@ -11,6 +11,17 @@ import type { UpdateRelease } from '../lib/api'
  */
 export const CHANGELOG: UpdateRelease[] = [
   {
+    id: '0.4.0',
+    date: '2026-05-13',
+    title: 'PDF / Word 也可以丟給 AI 看了',
+    items: [
+      { tag: 'feature', text: '對話可以上傳 PDF 跟 Word 檔（.docx / .doc）— 用 pymupdf / python-docx 抽文字，論文表格、公式都讀得到' },
+      { tag: 'feature', text: '上傳的 PDF / Word 會自動存到桌面「ruru_論文專區」資料夾，當作論文素材的固定家' },
+      { tag: 'feature', text: '上傳中會看到「解析 N 份 PDF / Word 中…」提示，避免一邊送一邊上傳半成品' },
+      { tag: 'change', text: '純文字檔還是走瀏覽器本機解析（零延遲）；PDF / Word 才走 mac mini 上的處理服務' },
+    ],
+  },
+  {
     id: '0.3.0',
     date: '2026-05-13',
     title: '論文用 — 上傳文件 / 看大圖 / 換 ruru 助理人設',

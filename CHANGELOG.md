@@ -16,7 +16,22 @@ Hermes WebUI 的開發紀錄。新版本由上往下排（最新在最上面）�
 
 ---
 
-## [0.3.0] — 2026-05-13
+## [0.4.0] — 2026-05-13
+
+PDF / Word 上傳支援（走自製 mini upload-server）
+
+### Added
+
+- 對話現在可以上傳 PDF / Word（.docx / .doc）。後端解析用 **pymupdf** + **python-docx**，品質遠勝瀏覽器端 pdfjs（表格、公式、reading order 都更好）。檔案會同時落地到 `/Users/young/Desktop/ruru_論文專區/uploads/` — ruru 的論文素材有了固定家
+- `upload-server/main.py`：FastAPI mini server，跑在 mac mini :9120。提供 `POST /upload`（上傳 + 抽文字）、`GET /list`（列出論文資料夾）、`GET /file/text?path=...`（重讀已上傳檔）、`GET /healthz`。安全層完整：Bearer token 認證（首次啟動自動生 `~/.hermes-upload-server.token`）、CORS 只允 localhost:5174、50MB 上限、副檔名白名單、檔名 sanitize（保留 CJK 但擋 path traversal）、只 bind 127.0.0.1（外網不可達，靠 SSH tunnel）
+- `npm run upload-server:deploy` / `:start` / `:token`：rsync 部署到 mac mini、SSH 啟動、抓 token。`tunnel` script 也加上 9120 forward，一條 SSH 同時轉發 8642 + 9119 + 9120
+- Vite proxy 的 `/upload-api` middleware 自動從 mac mini 抓 token 注入 `Authorization` header，token 完全不接觸瀏覽器（防 XSS exfil）
+- 前端 UI：PDF / docx 上傳中顯示「解析 N 份 PDF / Word 中…」status bar，send button 在解析中 disabled 避免送出半成品；檔案 chip 顯示檔名 + 字數
+- 既有的「上傳純文字檔」走原本瀏覽器 `file.text()` 路徑，沒走 server（純文字檔不需要重的解析、也不需要落地到 mac mini，零延遲）
+
+### Changed
+
+- `parseFile.ts` 從 `extractText()` 改成 `extractFile()`：回傳 `{ text, savedPath }`，內部自動分流純文字 vs PDF/docx。舊 `extractText()` 加 `@deprecated`，callers 都改完可以刪
 
 論文用 — 上傳文件 / 看大圖 / Hermes Dashboard 整合 / 換 ruru 助理人設
 

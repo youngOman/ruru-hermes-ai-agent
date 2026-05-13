@@ -1,13 +1,28 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Sparkles, ImagePlus, X } from 'lucide-react'
+import { Send, Loader2, Sparkles, ImagePlus, X, FileText } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Session, Message, MessageAttachment } from '../App'
+import type { Session, Message, MessageAttachment, MessageFileAttachment } from '../App'
 import { streamChat, type ChatMessage, type ChatContentPart } from '../lib/api'
 import { putImage, blobToDataUrl, getImage, getImageObjectUrl } from '../lib/imageStore'
+import { putFile, getFile } from '../lib/fileStore'
+import { extractText, isSupportedTextFile } from '../lib/parseFile'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10MB — gateway 那邊 base64 化後仍要塞進 request
-const ACCEPT_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const MAX_FILE_BYTES = 5 * 1024 * 1024 // 5MB — 純文字檔，整檔內容會塞進 prompt，過大 token 會爆
+const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+// accept 屬性下給瀏覽器的提示。實際是否接受由 isSupportedTextFile + IMAGE_MIMES 判斷。
+const FILE_PICKER_ACCEPT = [
+  ...IMAGE_MIMES,
+  'text/*',
+  '.md', '.markdown', '.csv', '.tsv', '.log',
+  '.json', '.jsonc', '.yaml', '.yml', '.toml', '.xml',
+  '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs',
+  '.py', '.rb', '.go', '.rs', '.java', '.kt', '.swift',
+  '.c', '.cc', '.cpp', '.h', '.hpp', '.cs',
+  '.sh', '.bash', '.sql', '.graphql',
+  '.env', '.ini', '.conf', '.toml',
+].join(',')
 
 /**
  * 草稿態的 attachment：剛從 file picker / drop / paste 收進來、
@@ -20,6 +35,19 @@ interface DraftAttachment {
   mime: string
   size: number
   objectUrl: string
+}
+
+/**
+ * 草稿態的文件附件（非圖片）。檔案已經解析完、寫進 fileStore，
+ * 拿到 fileId 後就只記 metadata。送 API 時把 extractedText
+ * 從 fileStore 撈出來、塞進 message 文字前面。
+ */
+interface DraftFile {
+  fileId: string
+  name: string
+  mime: string
+  size: number
+  charCount: number
 }
 
 /**
@@ -43,18 +71,52 @@ function rewriteMediaPaths(text: string): string {
 }
 
 /**
+ * 把 file drafts / fileAttachments 的 extractedText 組成一段給 AI 看的「資料區」。
+ * 多個檔案用清楚的標記隔開，方便 AI 知道每段是哪個檔。
+ *
+ * 之後接後端 ocr-and-documents skill 後，這段會改成只附 file path / id，
+ * 讓 agent 自己 invoke skill 抽文字 — 屆時前端就不用塞 extractedText。
+ */
+async function buildFileContext(
+  files: { fileId: string; name: string }[]
+): Promise<string> {
+  if (files.length === 0) return ''
+  const sections: string[] = []
+  for (const f of files) {
+    const stored = await getFile(f.fileId)
+    if (!stored) continue // 檔被清了，跳過
+    sections.push(
+      `[檔案：${stored.name}（${stored.charCount.toLocaleString()} 字）]\n${stored.extractedText}\n[/檔案：${stored.name}]`
+    )
+  }
+  return sections.join('\n\n')
+}
+
+/**
  * 把已存的 Message 還原成可以送進 streamChat 的 ChatMessage。
  * 純文字訊息保持 string，多模態才包成 parts array — Gateway 兩種都吃，
  * 但純字串可以省下一些 JSON 體積。
  */
 async function materializeMessage(m: Message): Promise<ChatMessage> {
   const role = m.role as 'user' | 'assistant'
-  if (!m.attachments || m.attachments.length === 0) {
-    return { role, content: m.content }
+  const hasImages = m.attachments && m.attachments.length > 0
+  const hasFiles = m.fileAttachments && m.fileAttachments.length > 0
+
+  // 把文件 extractedText 接到 text 前面，跟「新訊息」的處理一致
+  const fileContext = hasFiles ? await buildFileContext(m.fileAttachments!) : ''
+  const text = fileContext
+    ? m.content
+      ? `${fileContext}\n\n${m.content}`
+      : fileContext
+    : m.content
+
+  if (!hasImages) {
+    return { role, content: text }
   }
+
   const parts: ChatContentPart[] = []
-  if (m.content) parts.push({ type: 'text', text: m.content })
-  for (const att of m.attachments) {
+  if (text) parts.push({ type: 'text', text })
+  for (const att of m.attachments!) {
     const stored = await getImage(att.imageId)
     if (!stored) continue // 圖被使用者從 DB 清掉了；略過該 part，至少對話還能繼續
     const dataUrl = await blobToDataUrl(stored.blob)
@@ -119,6 +181,7 @@ export function ChatPage({
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [drafts, setDrafts] = useState<DraftAttachment[]>([])
+  const [draftFiles, setDraftFiles] = useState<DraftFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -145,33 +208,72 @@ export function ChatPage({
 
   const addFiles = async (files: FileList | File[]) => {
     setUploadError(null)
-    const accepted: DraftAttachment[] = []
+    const acceptedImages: DraftAttachment[] = []
+    const acceptedFiles: DraftFile[] = []
     const errors: string[] = []
 
     for (const file of Array.from(files)) {
-      if (!ACCEPT_MIME.includes(file.type)) {
-        errors.push(`${file.name || '檔案'} 不是支援的圖片格式`)
+      const isImage = IMAGE_MIMES.includes(file.type)
+      const isText = isSupportedTextFile(file)
+
+      if (!isImage && !isText) {
+        // PDF / docx 暫時不收 — 等後端 ocr-and-documents skill 接好
+        const ext = file.name.split('.').pop()?.toLowerCase()
+        if (ext === 'pdf' || ext === 'docx' || ext === 'doc') {
+          errors.push(`${file.name}：PDF / Word 還沒接後端解析，先傳純文字 / md / 程式碼或圖片`)
+        } else {
+          errors.push(`${file.name}：不支援的檔案類型`)
+        }
         continue
       }
-      if (file.size > MAX_IMAGE_BYTES) {
-        errors.push(`${file.name}（${(file.size / 1024 / 1024).toFixed(1)}MB）超過 10MB`)
+
+      if (isImage) {
+        if (file.size > MAX_IMAGE_BYTES) {
+          errors.push(`${file.name}（${(file.size / 1024 / 1024).toFixed(1)}MB）超過 10MB`)
+          continue
+        }
+        try {
+          const stored = await putImage(file)
+          acceptedImages.push({
+            imageId: stored.id,
+            name: stored.name,
+            mime: stored.mime,
+            size: stored.size,
+            objectUrl: URL.createObjectURL(stored.blob),
+          })
+        } catch (err) {
+          errors.push(`${file.name} 存檔失敗：${err instanceof Error ? err.message : '未知'}`)
+        }
+        continue
+      }
+
+      // 文字檔
+      if (file.size > MAX_FILE_BYTES) {
+        errors.push(`${file.name}（${(file.size / 1024 / 1024).toFixed(1)}MB）超過 5MB，AI 吃不下這麼長`)
         continue
       }
       try {
-        const stored = await putImage(file)
-        accepted.push({
-          imageId: stored.id,
+        const text = await extractText(file)
+        const stored = await putFile({
+          blob: file,
+          name: file.name,
+          mime: file.type || 'text/plain',
+          extractedText: text,
+        })
+        acceptedFiles.push({
+          fileId: stored.id,
           name: stored.name,
           mime: stored.mime,
           size: stored.size,
-          objectUrl: URL.createObjectURL(stored.blob),
+          charCount: stored.charCount,
         })
       } catch (err) {
-        errors.push(`${file.name} 存檔失敗：${err instanceof Error ? err.message : '未知'}`)
+        errors.push(`${file.name} 解析失敗：${err instanceof Error ? err.message : '未知'}`)
       }
     }
 
-    if (accepted.length > 0) setDrafts((prev) => [...prev, ...accepted])
+    if (acceptedImages.length > 0) setDrafts((prev) => [...prev, ...acceptedImages])
+    if (acceptedFiles.length > 0) setDraftFiles((prev) => [...prev, ...acceptedFiles])
     if (errors.length > 0) setUploadError(errors.join('；'))
   }
 
@@ -181,6 +283,10 @@ export function ChatPage({
       if (target) URL.revokeObjectURL(target.objectUrl)
       return prev.filter((d) => d.imageId !== imageId)
     })
+  }
+
+  const removeDraftFile = (fileId: string) => {
+    setDraftFiles((prev) => prev.filter((d) => d.fileId !== fileId))
   }
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -224,8 +330,8 @@ export function ChatPage({
   const handleSubmit = async () => {
     if (isLoading) return
     const trimmed = input.trim()
-    // 允許「只有圖、沒有文字」的送出
-    if (!trimmed && drafts.length === 0) return
+    // 允許「只有圖、只有文件、沒有文字」的送出
+    if (!trimmed && drafts.length === 0 && draftFiles.length === 0) return
 
     const userAttachments: MessageAttachment[] = drafts.map((d) => ({
       imageId: d.imageId,
@@ -234,26 +340,39 @@ export function ChatPage({
       size: d.size,
     }))
 
+    const userFileAttachments: MessageFileAttachment[] = draftFiles.map((d) => ({
+      fileId: d.fileId,
+      name: d.name,
+      mime: d.mime,
+      size: d.size,
+      charCount: d.charCount,
+    }))
+
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
       role: 'user',
       content: trimmed,
       timestamp: Date.now(),
       attachments: userAttachments.length > 0 ? userAttachments : undefined,
+      fileAttachments: userFileAttachments.length > 0 ? userFileAttachments : undefined,
     }
 
     // Auto-name session on first user message
     const isFirstUserMsg = session.messages.filter((m) => m.role === 'user').length === 0
     if (isFirstUserMsg) {
-      // 純圖片訊息也給個合理 fallback 名字
-      onAutoNameSession(session.id, trimmed || `[圖片] ${userAttachments[0]?.name ?? ''}`)
+      // 純圖片 / 純文件訊息也給個合理 fallback 名字
+      const fallback =
+        userAttachments[0]?.name ?? userFileAttachments[0]?.name ?? ''
+      onAutoNameSession(session.id, trimmed || `[附件] ${fallback}`)
     }
 
     onAddMessage(session.id, userMessage)
     setInput('')
     // 草稿用完就清掉，object URL 等下面 send 完後一次 revoke
     const draftsSnapshot = drafts
+    const draftFilesSnapshot = draftFiles
     setDrafts([])
+    setDraftFiles([])
     setUploadError(null)
     setIsLoading(true)
 
@@ -277,8 +396,16 @@ export function ChatPage({
       }
 
       // 2) 當前這則：草稿已經是 in-memory 的 blob，直接轉 base64
+      //    文件 extractedText 接在使用者文字「前面」一起當 text part — 這樣 AI 能先讀資料、再讀問題
+      const fileContext = await buildFileContext(draftFilesSnapshot)
+      const composedText = fileContext
+        ? trimmed
+          ? `${fileContext}\n\n${trimmed}`
+          : fileContext
+        : trimmed
+
       const currentParts: ChatContentPart[] = []
-      if (trimmed) currentParts.push({ type: 'text', text: trimmed })
+      if (composedText) currentParts.push({ type: 'text', text: composedText })
       for (const d of draftsSnapshot) {
         const stored = await getImage(d.imageId)
         if (!stored) continue
@@ -288,7 +415,7 @@ export function ChatPage({
       history.push({
         role: 'user',
         content: currentParts.length === 1 && currentParts[0].type === 'text'
-          ? currentParts[0].text  // 沒附件就回退到簡單字串，省 token
+          ? currentParts[0].text  // 沒圖片附件就回退到簡單字串，省 JSON 體積
           : currentParts,
       })
 
@@ -342,6 +469,7 @@ export function ChatPage({
           <div className="drop-overlay-card">
             <ImagePlus size={36} />
             <p>放開就上傳給 AI 看</p>
+            <p className="drop-overlay-hint">圖片 / 純文字 / 程式碼都可以</p>
           </div>
         </div>
       )}
@@ -416,6 +544,19 @@ export function ChatPage({
                 ) : (
                   <>
                     {msg.content && <span className="user-text">{msg.content}</span>}
+                    {msg.fileAttachments && msg.fileAttachments.length > 0 && (
+                      <div className="message-files">
+                        {msg.fileAttachments.map((f) => (
+                          <div key={f.fileId} className="message-file-chip" title={f.name}>
+                            <FileText size={14} />
+                            <span className="message-file-name">{f.name}</span>
+                            <span className="message-file-meta">
+                              {f.charCount.toLocaleString()} 字
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {msg.attachments && msg.attachments.length > 0 && (
                       <div className="message-images">
                         {msg.attachments.map((att) => (
@@ -439,7 +580,7 @@ export function ChatPage({
 
       {/* Input */}
       <div className="chat-input-area">
-        {drafts.length > 0 && (
+        {(drafts.length > 0 || draftFiles.length > 0) && (
           <div className="draft-row">
             {drafts.map((d) => (
               <div key={d.imageId} className="draft-chip">
@@ -448,6 +589,25 @@ export function ChatPage({
                   type="button"
                   className="draft-remove"
                   onClick={() => removeDraft(d.imageId)}
+                  aria-label={`移除 ${d.name}`}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+            {draftFiles.map((d) => (
+              <div key={d.fileId} className="draft-file-chip" title={d.name}>
+                <FileText size={16} />
+                <div className="draft-file-info">
+                  <span className="draft-file-name">{d.name}</span>
+                  <span className="draft-file-meta">
+                    {d.charCount.toLocaleString()} 字
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="draft-remove"
+                  onClick={() => removeDraftFile(d.fileId)}
                   aria-label={`移除 ${d.name}`}
                 >
                   <X size={12} />
@@ -465,7 +625,7 @@ export function ChatPage({
           <input
             ref={fileInputRef}
             type="file"
-            accept={ACCEPT_MIME.join(',')}
+            accept={FILE_PICKER_ACCEPT}
             multiple
             onChange={handleFilePick}
             style={{ display: 'none' }}
@@ -475,8 +635,8 @@ export function ChatPage({
             className="attach-btn"
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
-            aria-label="上傳圖片"
-            title="上傳圖片"
+            aria-label="上傳圖片或文件"
+            title="上傳圖片或文件（.txt / .md / 程式碼，PDF / Word 之後支援）"
           >
             <ImagePlus size={18} />
           </button>
@@ -493,7 +653,10 @@ export function ChatPage({
           <button
             className="send-btn"
             onClick={handleSubmit}
-            disabled={(!input.trim() && drafts.length === 0) || isLoading}
+            disabled={
+              (!input.trim() && drafts.length === 0 && draftFiles.length === 0) ||
+              isLoading
+            }
             aria-label="發送"
           >
             {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
@@ -1039,6 +1202,87 @@ export function ChatPage({
           font-size: 0.75rem;
           color: var(--fg-subtle);
           font-style: italic;
+        }
+
+        /* === 文件 chip（input 草稿區 + user message 內） === */
+        .draft-file-chip {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.45rem 1.6rem 0.45rem 0.6rem;
+          border-radius: 0.6rem;
+          border: 1px solid var(--border);
+          background: rgba(20, 20, 50, 0.65);
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+          color: var(--fg);
+          font-size: 0.8125rem;
+          max-width: 280px;
+          box-shadow: var(--shadow-soft);
+        }
+        .draft-file-info {
+          display: flex;
+          flex-direction: column;
+          gap: 0.1rem;
+          min-width: 0;
+        }
+        .draft-file-name {
+          font-weight: 500;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 180px;
+        }
+        .draft-file-meta {
+          font-size: 0.6875rem;
+          color: var(--fg-subtle);
+        }
+        .draft-file-chip .draft-remove {
+          /* 文件 chip 沒有圖片背景，按鈕用淺色版 */
+          background: rgba(255, 255, 255, 0.08);
+        }
+        .draft-file-chip .draft-remove:hover {
+          background: rgba(220, 70, 90, 0.9);
+        }
+
+        /* user message 內的文件 chip — 縮小、無刪除鍵、紫底配 user 泡泡 */
+        .message-files {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.4rem;
+          margin-top: 0.4rem;
+        }
+        .message-file-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+          padding: 0.35rem 0.6rem;
+          border-radius: 0.5rem;
+          background: rgba(255, 255, 255, 0.18);
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          font-size: 0.75rem;
+          color: #fff;
+          max-width: 220px;
+        }
+        .message-file-name {
+          font-weight: 500;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 120px;
+        }
+        .message-file-meta {
+          font-size: 0.6875rem;
+          opacity: 0.8;
+        }
+
+        /* drop overlay 加上次標題 */
+        .drop-overlay-hint {
+          font-size: 0.75rem;
+          font-weight: 400;
+          opacity: 0.75;
+          margin-top: -0.25rem !important;
         }
       `}</style>
     </div>

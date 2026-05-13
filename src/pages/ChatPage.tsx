@@ -7,6 +7,7 @@ import { streamChat, type ChatMessage, type ChatContentPart } from '../lib/api'
 import { putImage, blobToDataUrl, getImage, getImageObjectUrl } from '../lib/imageStore'
 import { putFile, getFile } from '../lib/fileStore'
 import { extractText, isSupportedTextFile } from '../lib/parseFile'
+import { ImageLightbox } from '../components/ImageLightbox'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10MB — gateway 那邊 base64 化後仍要塞進 request
 const MAX_FILE_BYTES = 5 * 1024 * 1024 // 5MB — 純文字檔，整檔內容會塞進 prompt，過大 token 會爆
@@ -128,8 +129,19 @@ async function materializeMessage(m: Message): Promise<ChatMessage> {
 /**
  * 從 IndexedDB 把圖讀出來顯示成 <img>。要單獨抽出來是因為 React 元件
  * 不能用 async render — useEffect + state 等 object URL 解出來再渲染。
+ *
+ * onClick 由 parent 注入 — 通常是「開 lightbox」，但邏輯不放這裡，
+ * 避免每個 thumb 都各自管 lightbox state。
  */
-function StoredImageThumb({ imageId, name }: { imageId: string; name: string }) {
+function StoredImageThumb({
+  imageId,
+  name,
+  onOpen,
+}: {
+  imageId: string
+  name: string
+  onOpen?: (url: string, name: string) => void
+}) {
   const [url, setUrl] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
 
@@ -157,7 +169,7 @@ function StoredImageThumb({ imageId, name }: { imageId: string; name: string }) 
       src={url}
       alt={name}
       className="message-image"
-      onClick={() => window.open(url, '_blank')}
+      onClick={() => onOpen?.(url, name)}
     />
   )
 }
@@ -184,6 +196,9 @@ export function ChatPage({
   const [draftFiles, setDraftFiles] = useState<DraftFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
+
+  const openLightbox = (src: string, alt: string) => setLightbox({ src, alt })
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -464,6 +479,13 @@ export function ChatPage({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          onClose={() => setLightbox(null)}
+        />
+      )}
       {isDragging && (
         <div className="drop-overlay">
           <div className="drop-overlay-card">
@@ -536,7 +558,21 @@ export function ChatPage({
               <div className="message-bubble">
                 {msg.role === 'assistant' ? (
                   <div className="markdown">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        img: ({ src, alt, ...rest }) => (
+                          <img
+                            {...rest}
+                            src={typeof src === 'string' ? src : undefined}
+                            alt={alt ?? ''}
+                            onClick={() => {
+                              if (typeof src === 'string') openLightbox(src, alt ?? '')
+                            }}
+                          />
+                        ),
+                      }}
+                    >
                       {rewriteMediaPaths(msg.content) || (msg.isStreaming ? '✨' : '')}
                     </ReactMarkdown>
                     {msg.isStreaming && <span className="cursor-blink">▊</span>}
@@ -564,6 +600,7 @@ export function ChatPage({
                             key={att.imageId}
                             imageId={att.imageId}
                             name={att.name}
+                            onOpen={openLightbox}
                           />
                         ))}
                       </div>
@@ -584,7 +621,11 @@ export function ChatPage({
           <div className="draft-row">
             {drafts.map((d) => (
               <div key={d.imageId} className="draft-chip">
-                <img src={d.objectUrl} alt={d.name} />
+                <img
+                  src={d.objectUrl}
+                  alt={d.name}
+                  onClick={() => openLightbox(d.objectUrl, d.name)}
+                />
                 <button
                   type="button"
                   className="draft-remove"
@@ -1113,6 +1154,11 @@ export function ChatPage({
           height: 100%;
           object-fit: cover;
           display: block;
+          cursor: zoom-in;
+          transition: transform 0.18s ease;
+        }
+        .draft-chip img:hover {
+          transform: scale(1.05);
         }
         .draft-remove {
           position: absolute;

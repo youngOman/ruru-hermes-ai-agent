@@ -74,8 +74,8 @@ export interface ExtractedFile {
  * 上傳 PDF / docx 到 mac mini 的 upload-server，拿回抽出來的文字。
  * Vite proxy 會自動帶 Authorization token，前端不接觸 token。
  *
- * upload-server 跑在 mac mini :9120，要先 `npm run upload-server:deploy`
- * 然後 `npm run upload-server:start`（並開著 tunnel）才能用。
+ * upload-server 跑在 mac mini :9120，要先 `pnpm upload-server:deploy`
+ * 然後 `pnpm upload-server:start`（並開著 tunnel）才能用。
  */
 async function uploadAndExtract(file: File): Promise<ExtractedFile> {
   const form = new FormData()
@@ -89,7 +89,7 @@ async function uploadAndExtract(file: File): Promise<ExtractedFile> {
     throw new Error(
       `連不上 upload-server（mac mini :9120）：${
         err instanceof Error ? err.message : '未知錯誤'
-      }。請確認 npm run tunnel + upload-server:start 都跑起來了`,
+      }。請確認 pnpm tunnel + upload-server:start 都跑起來了`,
     )
   }
 

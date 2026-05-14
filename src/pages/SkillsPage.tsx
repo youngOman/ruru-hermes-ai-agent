@@ -114,7 +114,7 @@ export function SkillsPage() {
                 {error instanceof Error ? error.message : String(error)}
               </p>
               <p className="error-hint">
-                檢查 admin tunnel（9119）是否還在：<code>npm run tunnel:status</code>
+                檢查 admin tunnel（9119）是否還在：<code>pnpm tunnel:status</code>
               </p>
             </div>
           </div>

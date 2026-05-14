@@ -127,8 +127,8 @@
 
 ```bash
 cd hermes-webui
-npm install
-npm run dev    # http://localhost:5173
+pnpm install
+pnpm dev    # http://localhost:5174
 ```
 
 ---

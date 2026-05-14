@@ -16,7 +16,7 @@ import { spawn, spawnSync } from 'node:child_process'
  *  - shells out to `ssh ${HERMES_SSH_HOST:-mini} cat <path>` and streams the bytes
  *  - guesses Content-Type from the file extension
  *
- * The SSH connection is reused via the existing `npm run tunnel` ControlMaster
+ * The SSH connection is reused via the existing `pnpm tunnel` ControlMaster
  * if you've set one up; otherwise each request opens a fresh ssh — slower but
  * still works.
  */
@@ -26,7 +26,7 @@ import { spawn, spawnSync } from 'node:child_process'
  * upload-server on first run and lives on the mac mini only — we never
  * persist it in this repo or in the browser.
  *
- * Cached for the lifetime of the Vite process. Restart `npm run dev` if you
+ * Cached for the lifetime of the Vite process. Restart `pnpm dev` if you
  * rotate the token.
  */
 let cachedUploadToken: string | null | undefined = undefined
@@ -201,7 +201,7 @@ export default defineConfig({
           if (!token) {
             console.warn(
               '[upload-api] ⚠ 抓不到 mac mini 上的 ~/.hermes-upload-server.token — ' +
-                '請先 `npm run upload-server:deploy && npm run upload-server:start`',
+                '請先 `pnpm upload-server:deploy && pnpm upload-server:start`',
             )
             return
           }

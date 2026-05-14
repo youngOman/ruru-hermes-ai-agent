@@ -29,10 +29,10 @@ $PY -m venv ~/.hermes-upload-server/venv
 
 ## 部署
 
-從這個 repo 用 `npm run upload-server:deploy` rsync 到 mac mini：
+從這個 repo 用 `pnpm upload-server:deploy` rsync 到 mac mini：
 
 ```bash
-npm run upload-server:deploy   # rsync upload-server/ → mini:~/.hermes-upload-server/
+pnpm upload-server:deploy   # rsync upload-server/ → mini:~/.hermes-upload-server/
 ```
 
 ## 跑起來
@@ -46,7 +46,7 @@ npm run upload-server:deploy   # rsync upload-server/ → mini:~/.hermes-upload-
 或從筆電一鍵跑：
 
 ```bash
-npm run upload-server:start    # ssh mini 'python ~/.hermes-upload-server/main.py'
+pnpm upload-server:start    # ssh mini 'python ~/.hermes-upload-server/main.py'
 ```
 
 啟動時會自動產生（或讀取）`~/.hermes-upload-server.token`，前端 webui 透過 vite proxy 注入這個 token。

@@ -79,22 +79,24 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 ## 本地開發 / 測試流程
 
+**包管理用 pnpm**，不是 npm。lockfile 是 `pnpm-lock.yaml`。`package-lock.json` 已 ignore，別 commit 進來。
+
 Hermes API server 跑在 mac mini（`mini` Tailscale host）的 `:8642`。
 筆電開發時透過 SSH tunnel 把筆電的 `127.0.0.1:8642` 接到 mac mini：
 
 ```bash
 # Terminal 1：開 tunnel（持續跑著，Ctrl-C 結束）
-npm run tunnel
+pnpm tunnel
 
 # Terminal 2：跑 Vite
-npm run dev    # → http://localhost:5174
+pnpm dev    # → http://localhost:5174
 ```
 
 工具 script：
 
-- `npm run tunnel` — 開 tunnel（預設連 `mini`，可用 `HERMES_SSH_HOST=xxx npm run tunnel` 換目標）
-- `npm run tunnel:status` — 看 tunnel 是否在 listen
-- `npm run tunnel:kill` — 殺掉背景 tunnel process
+- `pnpm tunnel` — 開 tunnel（預設連 `mini`，可用 `HERMES_SSH_HOST=xxx pnpm tunnel` 換目標）
+- `pnpm tunnel:status` — 看 tunnel 是否在 listen
+- `pnpm tunnel:kill` — 殺掉背景 tunnel process
 
 要求：
 

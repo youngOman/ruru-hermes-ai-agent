@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+# 我們用 pnpm — npm / yarn 的 lockfile 不該進 repo
+package-lock.json
+yarn.lock
 
 # Build
 dist/

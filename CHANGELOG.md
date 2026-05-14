@@ -14,6 +14,10 @@ Hermes WebUI 的開發紀錄。新版本由上往下排（最新在最上面）�
 
 ## [Unreleased]
 
+### Changed
+
+- 包管理工具從 npm 換成 **pnpm**（v11.1.1）。所有 doc、`package.json` 內 script 描述、UI 上的 error hint 都改用 `pnpm xxx` 形式。lockfile 改為 `pnpm-lock.yaml`，`package-lock.json` 進 `.gitignore`。`package.json` 加上 `packageManager: pnpm@11.1.1` + `engines.pnpm: ">=11"`，clone repo 後 corepack 會自動帶對版本
+
 ---
 
 ## [0.4.0] — 2026-05-13

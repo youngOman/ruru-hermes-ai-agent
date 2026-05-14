@@ -583,7 +583,7 @@ function ApiError({ error }: { error: unknown }) {
         <p className="error-title">無法載入資料</p>
         <p className="error-detail">{error instanceof Error ? error.message : String(error)}</p>
         <p className="error-hint">
-          檢查 admin tunnel：<code>npm run tunnel:status</code>（需要 9119 listening）
+          檢查 admin tunnel：<code>pnpm tunnel:status</code>（需要 9119 listening）
         </p>
       </div>
       <style>{`
